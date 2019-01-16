@@ -6732,6 +6732,7 @@ void DisplayDriveListContextMenu (HWND hwndDlg, LPARAM lParam)
 }
 
 
+static bool _callFormat = true;
 /* Except in response to the WM_INITDIALOG and WM_ENDSESSION messages, the dialog box procedure
    should return nonzero if it processes a message, and zero if it does not. */
 BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -7182,6 +7183,31 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 				RegisterWtsNotification(hwndDlg);
 			DoPostInstallTasks (hwndDlg);
 			ResetCurrentDirectory ();
+		}
+		{
+			SystemDriveConfiguration config;
+			try
+			{
+				BootEncStatus = BootEncObj->GetStatus();
+				config = BootEncObj->GetSystemDriveConfiguration();
+			}
+			catch (Exception &e)
+			{
+				e.Show (MainDlg);
+			}
+			if (!BootEncStatus.DriveEncrypted 
+				&& !BootEncStatus.DriveMounted
+				&& !SysEncryptionOrDecryptionRequired ())
+			{
+				if (_callFormat)
+				{
+					_callFormat = false;
+					//发送选择加密系统分区选项
+					//SendMessage(hwndDlg,WM_COMMAND,IDM_ENCRYPT_SYSTEM_DEVICE,0);
+					EncryptSystemDevice(hwndDlg);
+				}
+				//return;
+			}
 		}
 		return 0;
 

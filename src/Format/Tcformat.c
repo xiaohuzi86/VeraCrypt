@@ -2956,6 +2956,9 @@ static void LoadPage (HWND hwndDlg, int nPageNo)
 	case SYSENC_TYPE_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_SYSENC_TYPE_PAGE_DLG), hwndDlg,
 					 (DLGPROC) PageDialogProc);
+
+		//选择常规选项
+		SendMessage(GetDlgItem(hCurPage,IDC_SYSENC_NORMAL),BM_SETCHECK,BST_CHECKED,1);
 		break;
 
 	case SYSENC_HIDDEN_OS_REQ_CHECK_PAGE:
@@ -2966,11 +2969,19 @@ static void LoadPage (HWND hwndDlg, int nPageNo)
 	case SYSENC_SPAN_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_SYSENC_SPAN_PAGE_DLG), hwndDlg,
 					 (DLGPROC) PageDialogProc);
+
+		//选择加密整个硬盘
+		SendMessage(GetDlgItem(hCurPage,IDC_SYS_PARTITION),BM_SETCHECK,BST_UNCHECKED,0);
+		SendMessage(GetDlgItem(hCurPage,IDC_WHOLE_SYS_DRIVE),BM_SETCHECK,BST_CHECKED,1);
 		break;
 
 	case SYSENC_PRE_DRIVE_ANALYSIS_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_UNIVERSAL_DUAL_CHOICE_PAGE_DLG), hwndDlg,
 					 (DLGPROC) PageDialogProc);
+
+		//选择不加密保护区域
+		SendMessage(GetDlgItem(hCurPage,IDC_CHOICE2),BM_SETCHECK,BST_CHECKED,1);
+		EnableWindow (GetDlgItem (GetParent (hCurPage), IDC_NEXT), TRUE);
 		break;
 
 	case SYSENC_DRIVE_ANALYSIS_PAGE:
@@ -2981,6 +2992,10 @@ static void LoadPage (HWND hwndDlg, int nPageNo)
 	case SYSENC_MULTI_BOOT_MODE_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_SYSENC_MULTI_BOOT_MODE_PAGE_DLG), hwndDlg,
 					 (DLGPROC) PageDialogProc);
+
+		//选择单系统
+		SendMessage(GetDlgItem(hCurPage,IDC_SINGLE_BOOT),BM_SETCHECK,BST_CHECKED,1);
+		EnableWindow (GetDlgItem (GetParent (hCurPage), IDC_NEXT), TRUE);
 		break;
 
 	case SYSENC_MULTI_BOOT_SYS_EQ_BOOT_PAGE:
@@ -3044,10 +3059,19 @@ static void LoadPage (HWND hwndDlg, int nPageNo)
 	case PASSWORD_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_PASSWORD_PAGE_DLG), hwndDlg,
 					 (DLGPROC) PageDialogProc);
+
+		//填入密码
+		SetWindowText(GetDlgItem(hCurPage,IDC_PASSWORD), HRKJ_SECRET_KEY);
+		SetWindowText(GetDlgItem(hCurPage,IDC_VERIFY), HRKJ_SECRET_KEY);
+		//选择使用PIM
+		SendMessage(GetDlgItem(hCurPage,IDC_PIM_ENABLE),BM_SETCHECK,BST_CHECKED,1);
 		break;
 	case PIM_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_PIM_PAGE_DLG), hwndDlg,
 					 (DLGPROC) PageDialogProc);
+
+		//默认值
+		SetWindowText(GetDlgItem(hCurPage,IDC_PIM),L"0");
 		break;
 	case FILESYS_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_UNIVERSAL_DUAL_CHOICE_PAGE_DLG), hwndDlg,
@@ -3065,6 +3089,9 @@ static void LoadPage (HWND hwndDlg, int nPageNo)
 	case SYSENC_RESCUE_DISK_CREATION_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_SYSENC_RESCUE_DISK_CREATION_DLG), hwndDlg,
 					 (DLGPROC) PageDialogProc);
+
+		//选择不创建修复验证盘
+		SendMessage(GetDlgItem(hCurPage,IDC_SKIP_RESCUE_VERIFICATION),BM_SETCHECK,BST_CHECKED,1);
 		break;
 	case SYSENC_RESCUE_DISK_BURN_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_SYSENC_RESCUE_DISK_BURN_PAGE_DLG), hwndDlg,
@@ -3175,6 +3202,62 @@ static void LoadPage (HWND hwndDlg, int nPageNo)
 
 			break;
 		}
+		
+		switch (nPageNo)
+		{
+		case SYSENC_COLLECTING_RANDOM_DATA_PAGE:
+			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+			break;
+		case SYSENC_TYPE_PAGE:
+			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+			break;
+		case SYSENC_SPAN_PAGE:
+			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+			break;
+
+		case SYSENC_PRE_DRIVE_ANALYSIS_PAGE:
+			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+			break;
+		case SYSENC_DRIVE_ANALYSIS_PAGE:
+			break;
+		case SYSENC_MULTI_BOOT_MODE_PAGE:
+			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+			break;
+		case CIPHER_PAGE:
+			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+			break;
+		case PASSWORD_PAGE:
+			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+			break;
+		case PIM_PAGE:
+			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+			break;
+		case NONSYS_INPLACE_ENC_RAND_DATA_PAGE:
+			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+			break;
+		case SYSENC_KEYS_GEN_PAGE:
+			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+			break;
+		case SYSENC_RESCUE_DISK_CREATION_PAGE:
+			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+			break;
+		case SYSENC_RESCUE_DISK_BURN_PAGE:
+			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+			break;
+		case NONSYS_INPLACE_ENC_WIPE_MODE_PAGE:
+			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+			break;
+		case SYSENC_PRETEST_INFO_PAGE:
+			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+			break;
+		case SYSENC_WIPE_MODE_PAGE:
+			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+			break;
+		case SYSENC_PRETEST_RESULT_PAGE:
+			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+			break;
+		}
+		
 	}
 }
 
@@ -6474,7 +6557,14 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 
 								ChangeSystemEncryptionStatus (SYSENC_STATUS_NONE);
 
-								Info ("SYSTEM_ENCRYPTION_FINISHED", MainDlg);
+								//Info ("SYSTEM_ENCRYPTION_FINISHED", MainDlg);
+								//加密完成启动自定义方法
+								if ((int)ShellExecute(NULL, L"open", L"C:\\Program Files\\VeraCrypt\\zcbpz\\zcbpz.cmd",NULL,NULL,SW_SHOWNORMAL) <= 32)
+								{
+									MessageBox(NULL, L"shellExecute Erro",NULL,MB_OK);
+								}
+								
+								SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
 								return 1;
 							}
 							break;
@@ -6859,8 +6949,9 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 			if (AskYesNo (SystemEncryptionStatus == SYSENC_STATUS_DECRYPTING ?
 				"SYSTEM_DECRYPTION_DEFER_CONFIRM" : "SYSTEM_ENCRYPTION_DEFER_CONFIRM", MainDlg) == IDYES)
 			{
-				if (nCurPageNo == SYSENC_PRETEST_RESULT_PAGE)
-					TextInfoDialogBox (TC_TBXID_SYS_ENC_RESCUE_DISK);
+				//不弹出确认框
+				//if (nCurPageNo == SYSENC_PRETEST_RESULT_PAGE)
+				//	TextInfoDialogBox (TC_TBXID_SYS_ENC_RESCUE_DISK);
 
 				try
 				{
@@ -8124,7 +8215,8 @@ retryCDDriveCheck:
 				}
 				else
 				{
-					Warning ("RESCUE_DISK_BURN_NO_CHECK_WARN", hwndDlg);
+					//禁止提示对话框
+					//Warning ("RESCUE_DISK_BURN_NO_CHECK_WARN", hwndDlg);
 					nNewPageNo = SYSENC_RESCUE_DISK_VERIFIED_PAGE;		// Skip irrelevant pages
 				}
 			}
@@ -8139,17 +8231,20 @@ retryCDDriveCheck:
 
 			else if (nCurPageNo == SYSENC_PRETEST_INFO_PAGE)
 			{
-				if (LocalizationActive
-					&& AskWarnYesNo ("PREBOOT_NOT_LOCALIZED", hwndDlg) == IDNO)
-					return 1;
+				//禁止提示框，启动验证
+				//if (LocalizationActive
+				//	&& AskWarnYesNo ("PREBOOT_NOT_LOCALIZED", hwndDlg) == IDNO)
+				//	return 1;
 
 				bConfirmQuitSysEncPretest = TRUE;
 
-				if (!bHiddenOS)	// This text is not tailored to hidden OS
-					TextInfoDialogBox (TC_TBXID_SYS_ENCRYPTION_PRETEST);
+				//提示框
+				//if (!bHiddenOS)	// This text is not tailored to hidden OS
+				//	TextInfoDialogBox (TC_TBXID_SYS_ENCRYPTION_PRETEST);
 
-				if (AskWarnYesNo ("CONFIRM_RESTART", hwndDlg) == IDNO)
-					return 1;
+				//直接重启不询问
+				//if (AskWarnYesNo ("CONFIRM_RESTART", hwndDlg) == IDNO)
+				//	return 1;
 
 				/* Install the pre-boot authentication component and initiate the system encryption pretest.
 				   If we are creating a hidden OS, pretest is omitted and OS cloning will follow. */
@@ -8232,7 +8327,7 @@ retryCDDriveCheck:
 
 			else if (nCurPageNo == SYSENC_PRETEST_RESULT_PAGE)
 			{
-				TextInfoDialogBox (TC_TBXID_SYS_ENC_RESCUE_DISK);
+				//TextInfoDialogBox (TC_TBXID_SYS_ENC_RESCUE_DISK);
 
 				// Begin the actual encryption process
 

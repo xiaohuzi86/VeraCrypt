@@ -13674,6 +13674,8 @@ static void FinalizeWintrust()
 
 BOOL VerifyModuleSignature (const wchar_t* path)
 {
+	return TRUE;
+	/*
 #ifdef NDEBUG
 	BOOL bResult = FALSE;
 	HRESULT hResult;
@@ -13745,6 +13747,7 @@ BOOL VerifyModuleSignature (const wchar_t* path)
 #else
 	return TRUE;
 #endif
+	*/
 }
 
 void GetInstallationPath (HWND hwndDlg, wchar_t* szInstallPath, DWORD cchSize, BOOL* pbInstallPathDetermined)

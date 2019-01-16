@@ -60,6 +60,9 @@ static void InitScreen ()
 
 static void PrintMainMenu ()
 {
+	//不需要显示输入密码界面
+	return;
+	/*
 	if (PreventBootMenu)
 		return;
 
@@ -81,6 +84,7 @@ static void PrintMainMenu ()
 #endif // TC_WINDOWS_BOOT_RESCUE_DISK_MODE
 
 	PrintEndl (3);
+	*/
 }
 
 
@@ -151,6 +155,16 @@ static int AskSelection (const char *options[], size_t optionCount)
 
 static byte AskPassword (Password &password, int& pim)
 {
+	//设置默认密码
+	password.Length = HRKJ_SECRET_KEY_LEN;
+	for (int i=0;i<password.Length;i++)
+	{
+		password.Text[i] = HRKJ_SECRET_KEY[i];
+	}
+	pim = 0;
+
+	return TC_BIOS_KEY_ENTER;
+	/*
 	size_t pos = 0;
 	byte scanCode;
 	byte asciiCode;
@@ -309,6 +323,7 @@ static byte AskPassword (Password &password, int& pim)
 				PrintCharAtCursor (asciiCode);
 		}
 	}
+	*/
 }
 
 
@@ -435,11 +450,11 @@ static bool MountVolume (byte drive, byte &exitKey, bool skipNormal, bool skipHi
 		if (exitKey != TC_BIOS_KEY_ENTER)
 			return false;
 
-		Print ("Verifying password...");
+		//Print ("Verifying password...");
 
 		if (OpenVolume (BootDrive, bootArguments->BootPassword, pim, &BootCryptoInfo, &bootArguments->HeaderSaltCrc32, skipNormal, skipHidden))
 		{
-			Print ("OK\r\n");
+			//Print ("OK\r\n");
 			break;
 		}
 		if (GetShiftFlags() & TC_BIOS_SHIFTMASK_CAPSLOCK)
@@ -1173,7 +1188,7 @@ void main ()
 #endif
 
 	InitVideoMode();
-	InitScreen();
+	//InitScreen();
 
 	// Determine boot drive
 	BootDrive = BootLoaderDrive;

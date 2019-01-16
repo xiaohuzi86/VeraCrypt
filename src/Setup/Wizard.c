@@ -129,17 +129,28 @@ void LoadPage (HWND hwndDlg, int nPageNo)
 	case INTRO_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_INTRO_PAGE_DLG), hwndDlg,
 					 (DLGPROC) PageDialogProc);
+		//
+		SendMessage(GetDlgItem(hCurPage,IDC_AGREE),BM_SETCHECK,BST_CHECKED,0);
 		break;
 
 #ifndef PORTABLE
 	case WIZARD_MODE_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_WIZARD_MODE_PAGE_DLG), hwndDlg,
 					 (DLGPROC) PageDialogProc);
+		//
+		SendMessage(GetDlgItem(hCurPage,IDC_WIZARD_MODE_INSTALL),BM_SETCHECK,BST_CHECKED,0);
 		break;
 
 	case INSTALL_OPTIONS_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_INSTALL_OPTIONS_PAGE_DLG), hwndDlg,
 					 (DLGPROC) PageDialogProc);
+
+		//
+		SendMessage(GetDlgItem(hCurPage,IDC_ALL_USERS),BM_SETCHECK,BST_UNCHECKED,0);
+		SendMessage(GetDlgItem(hCurPage,IDC_PROG_GROUP),BM_SETCHECK,BST_UNCHECKED,0);
+		SendMessage(GetDlgItem(hCurPage,IDC_DESKTOP_ICON),BM_SETCHECK,BST_UNCHECKED,0);
+		SendMessage(GetDlgItem(hCurPage,IDC_FILE_TYPE),BM_SETCHECK,BST_UNCHECKED,0);
+		SendMessage(GetDlgItem(hCurPage,IDC_SYSTEM_RESTORE),BM_SETCHECK,BST_UNCHECKED,0);
 		break;
 
 	case INSTALL_PROGRESS_PAGE:
@@ -174,6 +185,24 @@ void LoadPage (HWND hwndDlg, int nPageNo)
 	{
 		MoveWindow (hCurPage, rD.left, rD.top, rW.right - rW.left, rW.bottom - rW.top, TRUE);
 		ShowWindow (hCurPage, SW_SHOWNORMAL);
+	}
+	//自动选择下一步
+	switch (nPageNo)
+	{
+	case INTRO_PAGE:
+		SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+		break;
+
+#ifndef PORTABLE
+	case WIZARD_MODE_PAGE:
+		SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+		break;
+
+	case INSTALL_OPTIONS_PAGE:
+		SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+		break;
+#endif
+
 	}
 
 	/* Refresh the graphics (white background of some texts, etc.) */
@@ -1094,6 +1123,8 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 		EnableWindow (GetDlgItem (hwndDlg, IDHELP), FALSE);
 		EnableWindow (GetDlgItem (hwndDlg, IDCANCEL), FALSE);
 
+		//
+		SendMessage(hwndDlg,WM_COMMAND,IDC_NEXT,0);
 
 		RefreshUIGFX ();
 		return 1;
@@ -1203,12 +1234,14 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 
 				bPromptReleaseNotes = FALSE;
 
+				//禁止弹网页链接
+				/*
 				if (bPromptTutorial
 					&& AskYesNo ("AFTER_INSTALL_TUTORIAL", hwndDlg) == IDYES)
 				{
 					Applink ("beginnerstutorial");
 				}
-
+				*/
 				bPromptTutorial = FALSE;
 			}
 

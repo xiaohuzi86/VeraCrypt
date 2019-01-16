@@ -135,6 +135,7 @@ BOOL CheckPasswordCharEncoding (HWND hPassword, Password *ptrPw)
 
 BOOL CheckPasswordLength (HWND hwndDlg, unsigned __int32 passwordLength, int pim, BOOL bForBoot, int bootPRF, BOOL bSkipPasswordWarning, BOOL bSkipPimWarning)
 {
+	/*
 	BOOL bootPimCondition = (bForBoot && (bootPRF != SHA512 && bootPRF != WHIRLPOOL))? TRUE : FALSE;
 	BOOL bCustomPimSmall = ((pim != 0) && (pim < (bootPimCondition? 98 : 485)))? TRUE : FALSE;
 	if (passwordLength < PASSWORD_LEN_WARNING)
@@ -164,6 +165,7 @@ BOOL CheckPasswordLength (HWND hwndDlg, unsigned __int32 passwordLength, int pim
 		Warning ("PIM_LARGE_WARNING", hwndDlg);
 
 	}
+	*/
 	return TRUE;
 }
 

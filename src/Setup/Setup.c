@@ -1888,9 +1888,13 @@ void OutcomePrompt (HWND hwndDlg, BOOL bOK)
 			if (bDevm)
 				PostMessage (MainDlg, WM_CLOSE, 0, 0);
 			else if (bPossiblyFirstTimeInstall || bRepairMode || (!bUpgrade && !bDowngrade))
-				Info ("INSTALL_OK", hwndDlg);
+			{
+				//Info ("INSTALL_OK", hwndDlg);
+			}
 			else
-				Info ("SETUP_UPDATE_OK", hwndDlg);
+			{
+				//Info ("SETUP_UPDATE_OK", hwndDlg);
+			}
 		}
 		else
 		{
@@ -2425,6 +2429,8 @@ static void UpdateSelectLanguageDialog (HWND hwndDlg)
 	LocalizationActive = bVal;
 }
 
+#define SELECT_OK_TIMER	1000
+
 BOOL CALLBACK SelectLanguageDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	WORD lw = LOWORD (wParam);
@@ -2483,6 +2489,8 @@ BOOL CALLBACK SelectLanguageDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, 
 				UpdateSelectLanguageDialog (hwndDlg);
 			}
 
+			//100毫秒发送选择确定按钮
+			SetTimer(hwndDlg, SELECT_OK_TIMER, 100, NULL);
 		}
 		return TRUE;
 
@@ -2506,6 +2514,15 @@ BOOL CALLBACK SelectLanguageDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, 
 			EndDialog (hwndDlg, IDCANCEL);
 			return 1;
 		}
+		return 0;
+	case WM_TIMER:
+		switch (wParam) 
+		{ 
+		case SELECT_OK_TIMER:			
+			//自动选择确定
+			SendMessage(hwndDlg,WM_COMMAND,IDOK,0);
+			break; 
+		} 
 		return 0;
 	}
 
