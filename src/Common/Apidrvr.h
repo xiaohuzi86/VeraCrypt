@@ -6,7 +6,7 @@
  Encryption for the Masses 2.02a, which is Copyright (c) 1998-2000 Paul Le Roux
  and which is governed by the 'License Agreement for Encryption for the Masses'
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages. */
@@ -42,11 +42,11 @@
 
 // Dismount volume
 // IN OUT - UNMOUNT_STRUCT
-#define TC_IOCTL_DISMOUNT_VOLUME						TC_IOCTL (4)
+#define TC_IOCTL_UNMOUNT_VOLUME						TC_IOCTL (4)
 
 // Dismount all volumes
 // IN OUT - UNMOUNT_STRUCT
-#define TC_IOCTL_DISMOUNT_ALL_VOLUMES					TC_IOCTL (5)
+#define TC_IOCTL_UNMOUNT_ALL_VOLUMES					TC_IOCTL (5)
 
 // Get list of all mounted volumes
 // IN OUT - MOUNT_LIST_STRUCT (only 26 volumes possible)
@@ -123,9 +123,11 @@
 // IN OUT - DISK_GEOMETRY_EX_STRUCT
 #define VC_IOCTL_GET_DRIVE_GEOMETRY_EX					TC_IOCTL (40)
 
-// Legacy IOCTLs used before version 5.0
-#define TC_IOCTL_LEGACY_GET_DRIVER_VERSION		466968
-#define TC_IOCTL_LEGACY_GET_MOUNTED_VOLUMES		466948
+#define VC_IOCTL_EMERGENCY_CLEAR_ALL_KEYS				TC_IOCTL (41)
+
+#define VC_IOCTL_IS_RAM_ENCRYPTION_ENABLED				TC_IOCTL (42)
+
+#define VC_IOCTL_ENCRYPTION_QUEUE_PARAMS				TC_IOCTL (43)
 
 // Undocumented IOCTL sent by Windows 10 when handling EFS data on volumes
 #define IOCTL_UNKNOWN_WINDOWS10_EFS_ACCESS				0x455610D8
@@ -164,7 +166,7 @@ typedef struct
 	BOOL RecoveryMode;
 	int pkcs5_prf;
 	int ProtectedHidVolPkcs5Prf;
-	BOOL bTrueCryptMode;
+	BOOL VolumeMountedReadOnlyAfterPartialSysEnc;
 	uint32 BytesPerPhysicalSector;
 	int VolumePim;
 	int ProtectedHidVolPim;
@@ -175,6 +177,7 @@ typedef struct
 	ULONG MaximumTransferLength;
 	ULONG MaximumPhysicalPages;
 	ULONG AlignmentMask;
+	BOOL VolumeMasterKeyVulnerable;
 } MOUNT_STRUCT;
 
 typedef struct
@@ -194,7 +197,7 @@ typedef struct
 	unsigned __int64 diskLength[26];
 	int ea[26];
 	int volumeType[26];	/* Volume type (e.g. PROP_VOL_TYPE_OUTER, PROP_VOL_TYPE_OUTER_VOL_WRITE_PREVENTED, etc.) */
-	BOOL truecryptMode[26];
+	BOOL reserved[26]; /* needed to keep the same size for the structure so that installer of new version can communicate with installed old version */
 } MOUNT_LIST_STRUCT;
 
 typedef struct
@@ -220,6 +223,7 @@ typedef struct
 	wchar_t wszLabel[33];
 	BOOL bDriverSetLabel;
 	unsigned char volumeID[VOLUME_ID_SIZE];
+	BOOL mountDisabled;
 } VOLUME_PROPERTIES_STRUCT;
 
 typedef struct
@@ -313,6 +317,8 @@ typedef struct
 	// is read-only (or mounted an outer/normal TrueCrypt volume as read only)
 	uint32 HiddenSysLeakProtectionCount;
 
+	BOOL MasterKeyVulnerable;
+
 } BootEncryptionStatus;
 
 
@@ -341,23 +347,23 @@ typedef struct
 
 typedef struct
 {
-	byte Fingerprint[WHIRLPOOL_DIGESTSIZE + SHA512_DIGESTSIZE];
+	uint8 Fingerprint[WHIRLPOOL_DIGESTSIZE + SHA512_DIGESTSIZE];
 } BootLoaderFingerprintRequest;
 
 typedef struct
 {
 	wchar_t DevicePath[TC_MAX_PATH];
-	byte Configuration;
+	uint8 Configuration;
 	BOOL DriveIsDynamic;
 	uint16 BootLoaderVersion;
-	byte UserConfiguration;
+	uint8 UserConfiguration;
 	char CustomUserMessage[TC_BOOT_SECTOR_USER_MESSAGE_MAX_LENGTH + 1];
 } GetSystemDriveConfigurationRequest;
 
 typedef struct
 {
 	WipeAlgorithmId WipeAlgorithm;
-	CRYPTOPP_ALIGN_DATA(16) byte WipeKey[MASTER_KEYDATA_SIZE];
+	CRYPTOPP_ALIGN_DATA(16) uint8 WipeKey[MASTER_KEYDATA_SIZE];
 } WipeDecoySystemRequest;
 
 typedef struct
@@ -370,7 +376,7 @@ typedef struct
 typedef struct
 {
 	LARGE_INTEGER Offset;
-	byte Data[TC_SECTOR_SIZE_BIOS];
+	uint8 Data[TC_SECTOR_SIZE_BIOS];
 } WriteBootDriveSectorRequest;
 
 typedef struct
@@ -384,6 +390,14 @@ typedef struct
 	struct _DriveFilterExtension *BootDriveFilterExtension;
 	BOOL HwEncryptionEnabled;
 } GetSystemDriveDumpConfigRequest;
+
+typedef struct
+{
+	int EncryptionIoRequestCount;
+	int EncryptionItemCount;
+	int EncryptionFragmentSize;
+	int EncryptionMaxWorkItems;
+} EncryptionQueueParameters;
 
 #pragma pack (pop)
 
@@ -402,6 +416,16 @@ typedef struct
 #define TC_DRIVER_CONFIG_REG_VALUE_NAME DRIVER_STR("VeraCryptConfig")
 #define TC_ENCRYPTION_FREE_CPU_COUNT_REG_VALUE_NAME DRIVER_STR("VeraCryptEncryptionFreeCpuCount")
 
+#define VC_ENCRYPTION_IO_REQUEST_COUNT DRIVER_STR("VeraCryptEncryptionIoRequestCount")
+#define VC_ENCRYPTION_ITEM_COUNT DRIVER_STR("VeraCryptEncryptionItemCount")
+#define VC_ENCRYPTION_FRAGMENT_SIZE DRIVER_STR("VeraCryptEncryptionFragmentSize")
+#define VC_ENCRYPTION_MAX_WORK_ITEMS DRIVER_STR("VeraCryptEncryptionMaxWorkItems")
+
+#define VC_ERASE_KEYS_SHUTDOWN DRIVER_STR("VeraCryptEraseKeysShutdown")
+
+#define VC_ENABLE_MEMORY_PROTECTION DRIVER_STR("VeraCryptEnableMemoryProtection")
+#define VC_ENABLE_SCREEN_PROTECTION DRIVER_STR("VeraCryptEnableScreenProtection")
+
 // WARNING: Modifying the following values can introduce incompatibility with previous versions.
 #define TC_DRIVER_CONFIG_CACHE_BOOT_PASSWORD						0x1
 #define TC_DRIVER_CONFIG_CACHE_BOOT_PASSWORD_FOR_SYS_FAVORITES		0x2
@@ -413,5 +437,8 @@ typedef struct
 #define VC_DRIVER_CONFIG_ALLOW_NONSYS_TRIM							0x80
 #define VC_DRIVER_CONFIG_BLOCK_SYS_TRIM								0x100
 #define VC_DRIVER_CONFIG_ALLOW_WINDOWS_DEFRAG						0x200
+#define VC_DRIVER_CONFIG_CLEAR_KEYS_ON_NEW_DEVICE_INSERTION			0x400
+#define VC_DRIVER_CONFIG_ENABLE_CPU_RNG								0x800
+#define VC_DRIVER_CONFIG_ENABLE_RAM_ENCRYPTION						0x1000
 
 #endif		/* _WIN32 */

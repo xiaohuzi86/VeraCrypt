@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -67,8 +67,8 @@ namespace VeraCrypt
 		bool CrossPlatformSupport;
 		static bool DeviceWarningConfirmed;
 		bool DisplayKeyInfo;
-		auto_ptr <wxTimer> ProgressTimer;
-		auto_ptr <wxTimer> RandomPoolUpdateTimer;
+		unique_ptr <wxTimer> ProgressTimer;
+		unique_ptr <wxTimer> RandomPoolUpdateTimer;
 		shared_ptr <KeyfileList> Keyfiles;
 		bool LargeFilesSupport;
 		uint64 MaxHiddenVolumeSize;
@@ -82,7 +82,9 @@ namespace VeraCrypt
 		VolumeHostType::Enum SelectedVolumeHostType;
 		VolumeType::Enum SelectedVolumeType;
 		shared_ptr <VolumePassword> Password;
+		shared_ptr <VolumePassword> OuterPassword;
 		int Pim;
+		int OuterPim;
 		shared_ptr <Pkcs5Kdf> Kdf;
 		uint32 SectorSize;
 		shared_ptr <Hash> SelectedHash;

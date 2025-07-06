@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file) 
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -45,12 +45,13 @@ HRESULT CreateElevatedComObject (HWND hwnd, REFGUID guid, REFIID iid, void **ppv
 BOOL ComGetInstanceBase (HWND hWnd, REFCLSID clsid, REFIID iid, void **tcServer)
 {
 	BOOL r;
+	HRESULT hr;
 
 	if (IsUacSupported ())
 	{
 		while (true)
 		{
-			r = CreateElevatedComObject (hWnd, clsid, iid, tcServer) == S_OK;
+			r = (hr = CreateElevatedComObject (hWnd, clsid, iid, tcServer)) == S_OK;
 			if (r)
 				break;
 			else
@@ -64,9 +65,14 @@ BOOL ComGetInstanceBase (HWND hWnd, REFCLSID clsid, REFIID iid, void **tcServer)
 	}
 	else
 	{
-		r = CoCreateInstance (clsid, NULL, CLSCTX_LOCAL_SERVER, iid, tcServer) == S_OK;
+		r = (hr = CoCreateInstance (clsid, NULL, CLSCTX_LOCAL_SERVER, iid, tcServer)) == S_OK;
 		if (!r)
 			Error ("UAC_INIT_ERROR", hWnd);
+	}
+
+	if (!r)
+	{
+		SetLastError((DWORD) hr);
 	}
 
 	return r;
@@ -130,7 +136,7 @@ DWORD BaseCom::ReadWriteFile (BOOL write, BOOL device, BSTR filePath, BSTR *buff
 {
 	try
 	{
-		auto_ptr <File> file (device ? new Device (filePath, !write) : new File (filePath, !write));
+		unique_ptr <File> file (device ? new Device (filePath, !write) : new File (filePath, !write));
 		file->CheckOpened (SRC_POS);
 		file->SeekAt (offset);
 
@@ -194,7 +200,7 @@ DWORD BaseCom::DeviceIoControl (BOOL readOnly, BOOL device, BSTR filePath, DWORD
 {
 	try
 	{
-		auto_ptr <File> file (device ? new Device (filePath, readOnly == TRUE) : new File (filePath, readOnly == TRUE));
+		unique_ptr <File> file (device ? new Device (filePath, readOnly == TRUE) : new File (filePath, readOnly == TRUE));
 		file->CheckOpened (SRC_POS);
 		if (!file->IoCtl (dwIoControlCode, (BYTE *) input, !(BYTE *) input ? 0 : ((DWORD *) ((BYTE *) input))[-1],
 			(BYTE *) *output, !(BYTE *) *output ? 0 : ((DWORD *) ((BYTE *) *output))[-1]))
@@ -444,7 +450,7 @@ DWORD BaseCom::WriteEfiBootSectorUserConfig (DWORD userConfig, BSTR customUserMe
 			msg [maxSize - 1] = 0;
 		std::string msgStr = maxSize > 0 ? msg : "";
 		BootEncryption bootEnc (NULL);
-		bootEnc.WriteEfiBootSectorUserConfig ((byte) userConfig,  msgStr, pim, hashAlg);
+		bootEnc.WriteEfiBootSectorUserConfig ((uint8) userConfig,  msgStr, pim, hashAlg);
 	}
 	catch (SystemException &)
 	{
@@ -485,4 +491,14 @@ DWORD BaseCom::UpdateSetupConfigFile (BOOL bForInstall)
 	}
 
 	return ERROR_SUCCESS;
+}
+
+DWORD BaseCom::NotifyService(DWORD dwNotifyCode)
+{
+	return SendServiceNotification(dwNotifyCode);
+}
+
+DWORD BaseCom::FastFileResize (BSTR filePath, __int64 fileSize)
+{
+	return ::FastResizeFile (filePath, fileSize);
 }

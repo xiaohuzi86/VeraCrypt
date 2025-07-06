@@ -29,6 +29,11 @@
 	#define CRYPTOPP_CLANG_INTEGRATED_ASSEMBLER 1
 #endif
 
+#if defined(_MSC_VER) && !defined(__clang__)
+# undef CRYPTOPP_LLVM_CLANG_VERSION
+# define CRYPTOPP_MSC_VERSION (_MSC_VER)
+#endif
+
 // Clang due to "Inline assembly operands don't work with .intel_syntax", http://llvm.org/bugs/show_bug.cgi?id=24232
 //   TODO: supply the upper version when LLVM fixes it. We set it to 20.0 for compilation purposes.
 #if (defined(CRYPTOPP_LLVM_CLANG_VERSION) && CRYPTOPP_LLVM_CLANG_VERSION <= 200000) || (defined(CRYPTOPP_APPLE_CLANG_VERSION) && CRYPTOPP_APPLE_CLANG_VERSION <= 200000) || defined(CRYPTOPP_CLANG_INTEGRATED_ASSEMBLER)
@@ -51,7 +56,7 @@
 #endif
 
 #ifndef CRYPTOPP_ALIGN_DATA
-	#if defined(_MSC_VER)
+	#if defined(_MSC_VER) && !defined(TC_WINDOWS_BOOT)
 		#define CRYPTOPP_ALIGN_DATA(x) __declspec(align(x))
 	#elif defined(__GNUC__)
 		#define CRYPTOPP_ALIGN_DATA(x) __attribute__((aligned(x)))
@@ -113,10 +118,25 @@
     #define CRYPTOPP_X64_ASM_AVAILABLE
 #endif
 
-#if !defined(CRYPTOPP_DISABLE_SSE2) && (defined(CRYPTOPP_MSVC6PP_OR_LATER) || defined(__SSE2__)) && !defined(_M_ARM)
+#if !defined(CRYPTOPP_DISABLE_SSE2) && (defined(CRYPTOPP_MSVC6PP_OR_LATER) || defined(__SSE2__)) && !defined(_M_ARM) && !defined(_M_ARM64) && !defined(__arm__) && !defined(__aarch64__) && !defined(__arm64__)
     #define CRYPTOPP_BOOL_SSE2_INTRINSICS_AVAILABLE 1
 #else
     #define CRYPTOPP_BOOL_SSE2_INTRINSICS_AVAILABLE 0
+#endif
+
+#if !defined(CRYPTOPP_DISABLE_ASM) && !defined(CRYPTOPP_DISABLE_SSSE3) && !defined(_M_ARM) && !defined(_M_ARM64) && !defined(__arm__) && !defined(__aarch64__) && !defined(__arm64__) && ( \
+	defined(__SSSE3__) || (_MSC_VER >= 1500) || \
+	(CRYPTOPP_GCC_VERSION >= 40300) || (__INTEL_COMPILER >= 1000) || (__SUNPRO_CC >= 0x5110) || \
+	(CRYPTOPP_LLVM_CLANG_VERSION >= 20300) || (CRYPTOPP_APPLE_CLANG_VERSION >= 40000))
+	#define CRYPTOPP_SSSE3_AVAILABLE 1
+#else
+	#define CRYPTOPP_SSSE3_AVAILABLE 0
+# endif
+
+#if !defined(CRYPTOPP_DISABLE_SSSE3) && (defined(__SSSE3__) || (_MSC_VER >= 1500)) && !defined(_M_ARM) && !defined(_M_ARM64) && !defined(__arm__) && !defined(__aarch64__) && !defined(__arm64__)
+    #define CRYPTOPP_BOOL_SSSE3_INTRINSICS_AVAILABLE 1
+#else
+    #define CRYPTOPP_BOOL_SSSE3_INTRINSICS_AVAILABLE 0
 #endif
 
 #if !defined(CRYPTOPP_DISABLE_SSSE3) && !defined(CRYPTOPP_DISABLE_AESNI) && CRYPTOPP_BOOL_SSE2_INTRINSICS_AVAILABLE && (CRYPTOPP_GCC_VERSION >= 40400 || _MSC_FULL_VER >= 150030729 || __INTEL_COMPILER >= 1110 || defined(__AES__))
@@ -131,7 +151,7 @@
     #define CRYPTOPP_BOOL_ALIGN16 0
 #endif
 
-#if CRYPTOPP_BOOL_AESNI_INTRINSICS_AVAILABLE && (defined(__SSE4_1__) || defined(__INTEL_COMPILER) || defined(_MSC_VER))
+#if CRYPTOPP_BOOL_SSSE3_INTRINSICS_AVAILABLE && (defined(__SSE4_1__) || defined(__INTEL_COMPILER) || defined(_MSC_VER))
     #define CRYPTOPP_BOOL_SSE41_INTRINSICS_AVAILABLE 1
 #else
     #define CRYPTOPP_BOOL_SSE41_INTRINSICS_AVAILABLE 0
@@ -177,6 +197,64 @@
     #define CRYPTOPP_BOOL_X64 0
 #endif
 
+#if !defined(CRYPTOPP_DISABLE_SHANI) && \
+	(CRYPTOPP_BOOL_X32 || CRYPTOPP_BOOL_X86 || CRYPTOPP_BOOL_X64) && \
+	defined(CRYPTOPP_BOOL_SSE41_INTRINSICS_AVAILABLE) && \
+	(defined(__SHA__) || (_MSC_VER >= 1900) || (__SUNPRO_CC >= 0x5160) || \
+	(CRYPTOPP_GCC_VERSION >= 40900) || (__INTEL_COMPILER >= 1600) || \
+	(CRYPTOPP_LLVM_CLANG_VERSION >= 30400) || (CRYPTOPP_APPLE_CLANG_VERSION >= 50100))
+	#define CRYPTOPP_SHANI_AVAILABLE 1
+#else
+	#define CRYPTOPP_SHANI_AVAILABLE 0
+#endif
+
+#if defined(__arm64__) || defined(__aarch64__) || defined(_M_ARM64)
+	#define CRYPTOPP_BOOL_ARMV8 1
+	#define CRYPTOPP_BOOL_ARM64 1
+#else
+	#define CRYPTOPP_BOOL_ARMV8 0
+	#define CRYPTOPP_BOOL_ARM64 0
+#endif
+
+// ARMv8 and ASIMD. -march=armv8-a or above must be present
+// Requires GCC 4.8, Clang 3.3 or Visual Studio 2017
+// Do not use APPLE_CLANG_VERSION; use __ARM_FEATURE_XXX instead.
+#if !defined(CRYPTOPP_ARM_ASIMD_AVAILABLE) && !defined(CRYPTOPP_DISABLE_ARM_ASIMD)
+# if defined(__aarch32__) || defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64)
+#  if defined(__ARM_NEON) || defined(__ARM_ASIMD) || defined(__ARM_FEATURE_NEON) || defined(__ARM_FEATURE_ASIMD) || \
+      (CRYPTOPP_GCC_VERSION >= 40800) || (CRYPTOPP_LLVM_CLANG_VERSION >= 30300) || \
+      (CRYPTOPP_APPLE_CLANG_VERSION >= 40000) || (CRYPTOPP_MSC_VERSION >= 1916)
+#   define CRYPTOPP_ARM_NEON_AVAILABLE 1
+#   define CRYPTOPP_ARM_ASIMD_AVAILABLE 1
+#  endif  // Compilers
+# endif  // Platforms
+#endif
+
+// ARMv8 and AES. -march=armv8-a+crypto or above must be present
+// Requires GCC 4.8, Clang 3.3 or Visual Studio 2017
+#if !defined(CRYPTOPP_ARM_AES_AVAILABLE) && !defined(CRYPTOPP_DISABLE_ARM_AES)
+# if defined(__aarch32__) || defined(__aarch64__) || defined(_M_ARM64)
+#  if defined(__ARM_FEATURE_CRYPTO) || (CRYPTOPP_GCC_VERSION >= 40800) || \
+      (CRYPTOPP_LLVM_CLANG_VERSION >= 30300) || (CRYPTOPP_APPLE_CLANG_VERSION >= 40300) || \
+      (CRYPTOPP_MSC_VERSION >= 1916)
+#   define CRYPTOPP_ARM_AES_AVAILABLE 1
+#  endif  // Compilers
+# endif  // Platforms
+#endif
+
+// ARMv8 and SHA-1, SHA-256. -march=armv8-a+crypto or above must be present
+// Requires GCC 4.8, Clang 3.3 or Visual Studio 2017
+#if !defined(CRYPTOPP_ARM_SHA_AVAILABLE) && !defined(CRYPTOPP_DISABLE_ARM_SHA)
+# if defined(__aarch32__) || defined(__aarch64__) || defined(_M_ARM64)
+#  if defined(__ARM_FEATURE_CRYPTO) || (CRYPTOPP_GCC_VERSION >= 40800) || \
+      (CRYPTOPP_LLVM_CLANG_VERSION >= 30300) || (CRYPTOPP_APPLE_CLANG_VERSION >= 40300) || \
+      (CRYPTOPP_MSC_VERSION >= 1916)
+#   define CRYPTOPP_ARM_SHA1_AVAILABLE 1
+#   define CRYPTOPP_ARM_SHA2_AVAILABLE 1
+#  endif  // Compilers
+# endif  // Platforms
+#endif
+
 // Undo the ASM and Intrinsic related defines due to X32.
 #if CRYPTOPP_BOOL_X32
 # undef CRYPTOPP_BOOL_X64
@@ -194,8 +272,8 @@
 #define GETBYTE(x, y) (unsigned int)((unsigned char)((x)>>(8*(y))))
 // these may be faster on other CPUs/compilers
 // #define GETBYTE(x, y) (unsigned int)(((x)>>(8*(y)))&255)
-// #define GETBYTE(x, y) (((byte *)&(x))[y])
+// #define GETBYTE(x, y) (((uint8 *)&(x))[y])
 
-#define CRYPTOPP_GET_BYTE_AS_BYTE(x, y) ((byte)((x)>>(8*(y))))
+#define CRYPTOPP_GET_BYTE_AS_BYTE(x, y) ((uint8)((x)>>(8*(y))))
 
 #endif

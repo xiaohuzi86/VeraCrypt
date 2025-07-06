@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -20,6 +20,12 @@ namespace VeraCrypt
 {
 	CoreBase::CoreBase ()
 		: DeviceChangeInProgress (false)
+#if defined(TC_LINUX ) || defined (TC_FREEBSD)
+		, UseDummySudoPassword (false)
+#endif
+#if defined(TC_UNIX)
+		,AllowInsecureMount (false)
+#endif
 	{
 	}
 
@@ -27,20 +33,14 @@ namespace VeraCrypt
 	{
 	}
 
-	void CoreBase::ChangePassword (shared_ptr <Volume> openVolume, shared_ptr <VolumePassword> newPassword, int newPim, shared_ptr <KeyfileList> newKeyfiles, shared_ptr <Pkcs5Kdf> newPkcs5Kdf, int wipeCount) const
+	void CoreBase::ChangePassword (shared_ptr <Volume> openVolume, shared_ptr <VolumePassword> newPassword, int newPim, shared_ptr <KeyfileList> newKeyfiles, bool emvSupportEnabled, shared_ptr <Pkcs5Kdf> newPkcs5Kdf, int wipeCount) const
 	{
 		if ((!newPassword || newPassword->Size() < 1) && (!newKeyfiles || newKeyfiles->empty()))
 			throw PasswordEmpty (SRC_POS);
 
 		if (!newPkcs5Kdf)
 		{
-			if (openVolume->GetPkcs5Kdf()->GetTrueCryptMode ())
-			{
-				newPkcs5Kdf.reset (openVolume->GetPkcs5Kdf()->Clone());
-				newPkcs5Kdf->SetTrueCryptMode (false);
-			}
-			else
-				newPkcs5Kdf = openVolume->GetPkcs5Kdf();
+			newPkcs5Kdf = openVolume->GetPkcs5Kdf();
 		}
 
 		if ((openVolume->GetHeader()->GetFlags() & TC_HEADER_FLAG_ENCRYPTED_SYSTEM) != 0
@@ -55,7 +55,7 @@ namespace VeraCrypt
 		SecureBuffer newSalt (openVolume->GetSaltSize());
 		SecureBuffer newHeaderKey (VolumeHeader::GetLargestSerializedKeySize());
 
-		shared_ptr <VolumePassword> password (Keyfile::ApplyListToPassword (newKeyfiles, newPassword));
+		shared_ptr <VolumePassword> password (Keyfile::ApplyListToPassword (newKeyfiles, newPassword, emvSupportEnabled));
 
 		bool backupHeader = false;
 		while (true)
@@ -80,10 +80,11 @@ namespace VeraCrypt
 		}
 	}
 
-	void CoreBase::ChangePassword (shared_ptr <VolumePath> volumePath, bool preserveTimestamps, shared_ptr <VolumePassword> password, int pim, shared_ptr <Pkcs5Kdf> kdf, bool truecryptMode, shared_ptr <KeyfileList> keyfiles, shared_ptr <VolumePassword> newPassword, int newPim, shared_ptr <KeyfileList> newKeyfiles, shared_ptr <Pkcs5Kdf> newPkcs5Kdf, int wipeCount) const
+	shared_ptr <Volume> CoreBase::ChangePassword (shared_ptr <VolumePath> volumePath, bool preserveTimestamps, shared_ptr <VolumePassword> password, int pim, shared_ptr <Pkcs5Kdf> kdf, shared_ptr <KeyfileList> keyfiles, shared_ptr <VolumePassword> newPassword, int newPim, shared_ptr <KeyfileList> newKeyfiles, bool emvSupportEnabled, shared_ptr <Pkcs5Kdf> newPkcs5Kdf, int wipeCount) const
 	{
-		shared_ptr <Volume> volume = OpenVolume (volumePath, preserveTimestamps, password, pim, kdf, truecryptMode, keyfiles);
-		ChangePassword (volume, newPassword, newPim, newKeyfiles, newPkcs5Kdf, wipeCount);
+		shared_ptr <Volume> volume = OpenVolume (volumePath, preserveTimestamps, password, pim, kdf, keyfiles, emvSupportEnabled);
+		ChangePassword (volume, newPassword, newPim, newKeyfiles, emvSupportEnabled, newPkcs5Kdf, wipeCount);
+		return volume;
 	}
 
 	void CoreBase::CoalesceSlotNumberAndMountPoint (MountOptions &options) const
@@ -147,7 +148,7 @@ namespace VeraCrypt
 		outerVolume->ReadSectors (bootSectorBuffer, 0);
 
 		int fatType;
-		byte *bootSector = bootSectorBuffer.Ptr();
+		uint8 *bootSector = bootSectorBuffer.Ptr();
 
 		if (memcmp (bootSector + 54, "FAT12", 5) == 0)
 			fatType = 12;
@@ -251,13 +252,17 @@ namespace VeraCrypt
 
 	bool CoreBase::IsVolumeMounted (const VolumePath &volumePath) const
 	{
-		return GetMountedVolume (volumePath);
+		shared_ptr<VolumeInfo> mountedVolume = GetMountedVolume (volumePath);
+		if (mountedVolume)
+			return true;
+		else
+			return false;
 	}
 
-	shared_ptr <Volume> CoreBase::OpenVolume (shared_ptr <VolumePath> volumePath, bool preserveTimestamps, shared_ptr <VolumePassword> password, int pim, shared_ptr<Pkcs5Kdf> kdf, bool truecryptMode, shared_ptr <KeyfileList> keyfiles, VolumeProtection::Enum protection, shared_ptr <VolumePassword> protectionPassword, int protectionPim, shared_ptr<Pkcs5Kdf> protectionKdf, shared_ptr <KeyfileList> protectionKeyfiles, bool sharedAccessAllowed, VolumeType::Enum volumeType, bool useBackupHeaders, bool partitionInSystemEncryptionScope) const
+	shared_ptr <Volume> CoreBase::OpenVolume (shared_ptr <VolumePath> volumePath, bool preserveTimestamps, shared_ptr <VolumePassword> password, int pim, shared_ptr<Pkcs5Kdf> kdf, shared_ptr <KeyfileList> keyfiles, bool emvSupportEnabled, VolumeProtection::Enum protection, shared_ptr <VolumePassword> protectionPassword, int protectionPim, shared_ptr<Pkcs5Kdf> protectionKdf, shared_ptr <KeyfileList> protectionKeyfiles, bool sharedAccessAllowed, VolumeType::Enum volumeType, bool useBackupHeaders, bool partitionInSystemEncryptionScope) const
 	{
 		make_shared_auto (Volume, volume);
-		volume->Open (*volumePath, preserveTimestamps, password, pim, kdf, truecryptMode, keyfiles, protection, protectionPassword, protectionPim, protectionKdf, protectionKeyfiles, sharedAccessAllowed, volumeType, useBackupHeaders, partitionInSystemEncryptionScope);
+		volume->Open (*volumePath, preserveTimestamps, password, pim, kdf, keyfiles, emvSupportEnabled, protection, protectionPassword, protectionPim, protectionKdf, protectionKeyfiles, sharedAccessAllowed, volumeType, useBackupHeaders, partitionInSystemEncryptionScope);
 		return volume;
 	}
 
@@ -272,7 +277,7 @@ namespace VeraCrypt
 		encryptionAlgorithm->GetMode()->SetKey (modeKey);
 	}
 
-	void CoreBase::ReEncryptVolumeHeaderWithNewSalt (const BufferPtr &newHeaderBuffer, shared_ptr <VolumeHeader> header, shared_ptr <VolumePassword> password, int pim, shared_ptr <KeyfileList> keyfiles) const
+	void CoreBase::ReEncryptVolumeHeaderWithNewSalt (const BufferPtr &newHeaderBuffer, shared_ptr <VolumeHeader> header, shared_ptr <VolumePassword> password, int pim, shared_ptr <KeyfileList> keyfiles, bool emvSupportEnabled) const
 	{
 		shared_ptr <Pkcs5Kdf> pkcs5Kdf = header->GetPkcs5Kdf();
 
@@ -281,7 +286,7 @@ namespace VeraCrypt
 		SecureBuffer newSalt (header->GetSaltSize());
 		SecureBuffer newHeaderKey (VolumeHeader::GetLargestSerializedKeySize());
 
-		shared_ptr <VolumePassword> passwordKey (Keyfile::ApplyListToPassword (keyfiles, password));
+		shared_ptr <VolumePassword> passwordKey (Keyfile::ApplyListToPassword (keyfiles, password, emvSupportEnabled));
 
 		RandomNumberGenerator::GetData (newSalt);
 		pkcs5Kdf->DeriveKey (newHeaderKey, *passwordKey, pim, newSalt);

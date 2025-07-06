@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -44,7 +44,7 @@ namespace VeraCrypt
 			};
 
 			struct WorkItem *FirstFragment;
-			auto_ptr <Exception> ItemException;
+			unique_ptr <Exception> ItemException;
 			SyncEvent ItemCompletedEvent;
 			SharedVal <size_t> OutstandingFragmentCount;
 			SharedVal <State::Enum> State;
@@ -55,7 +55,7 @@ namespace VeraCrypt
 				struct
 				{
 					const EncryptionMode *Mode;
-					byte *Data;
+					uint8 *Data;
 					uint64 StartUnitNo;
 					uint64 UnitCount;
 					size_t SectorSize;
@@ -63,7 +63,7 @@ namespace VeraCrypt
 			};
 		};
 
-		static void DoWork (WorkType::Enum type, const EncryptionMode *mode, byte *data, uint64 startUnitNo, uint64 unitCount, size_t sectorSize);
+		static void DoWork (WorkType::Enum type, const EncryptionMode *mode, uint8 *data, uint64 startUnitNo, uint64 unitCount, size_t sectorSize);
 		static bool IsRunning () { return ThreadPoolRunning; }
 		static void Start ();
 		static void Stop ();

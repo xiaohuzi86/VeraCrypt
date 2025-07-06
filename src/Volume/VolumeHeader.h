@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -60,7 +60,7 @@ namespace VeraCrypt
 		virtual ~VolumeHeader ();
 
 		void Create (const BufferPtr &headerBuffer, VolumeHeaderCreationOptions &options);
-		bool Decrypt (const ConstBufferPtr &encryptedData, const VolumePassword &password, int pim, shared_ptr <Pkcs5Kdf> kdf, bool truecryptMode, const Pkcs5KdfList &keyDerivationFunctions, const EncryptionAlgorithmList &encryptionAlgorithms, const EncryptionModeList &encryptionModes);
+		bool Decrypt (const ConstBufferPtr &encryptedData, const VolumePassword &password, int pim, shared_ptr <Pkcs5Kdf> kdf, const Pkcs5KdfList &keyDerivationFunctions, const EncryptionAlgorithmList &encryptionAlgorithms, const EncryptionModeList &encryptionModes);
 		void EncryptNew (const BufferPtr &newHeaderBuffer, const ConstBufferPtr &newSalt, const ConstBufferPtr &newHeaderKey, shared_ptr <Pkcs5Kdf> newPkcs5Kdf);
 		uint64 GetEncryptedAreaStart () const { return EncryptedAreaStart; }
 		uint64 GetEncryptedAreaLength () const { return EncryptedAreaLength; }
@@ -76,9 +76,10 @@ namespace VeraCrypt
 		uint64 GetVolumeDataSize () const { return VolumeDataSize; }
 		VolumeTime GetVolumeCreationTime () const { return VolumeCreationTime; }
 		void SetSize (uint32 headerSize);
+		bool IsMasterKeyVulnerable () const { return XtsKeyVulnerable; }
 
 	protected:
-		bool Deserialize (const ConstBufferPtr &header, shared_ptr <EncryptionAlgorithm> &ea, shared_ptr <EncryptionMode> &mode, bool truecryptMode);
+		bool Deserialize (const ConstBufferPtr &header, shared_ptr <EncryptionAlgorithm> &ea, shared_ptr <EncryptionMode> &mode);
 		template <typename T> T DeserializeEntry (const ConstBufferPtr &header, size_t &offset) const;
 		template <typename T> T DeserializeEntryAt (const ConstBufferPtr &header, const size_t &offset) const;
 		void Init ();
@@ -120,6 +121,7 @@ namespace VeraCrypt
 		uint32 SectorSize;
 
 		SecureBuffer DataAreaKey;
+		bool XtsKeyVulnerable;
 
 	private:
 		VolumeHeader (const VolumeHeader &);

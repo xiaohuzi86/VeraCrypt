@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -24,6 +24,46 @@
 
 namespace VeraCrypt
 {
+#ifdef TC_LINUX
+	static string GetTmpUser ();
+	static bool SamePath (const string& path1, const string& path2);
+#endif
+
+	// Struct to hold terminal emulator information
+	struct TerminalInfo {
+		const char* name;
+		const char** args;
+		const char** dependency_path;
+	};
+
+	// Popular terminal emulators data and arguments
+	static const char* xterm_args[] = {"-T", "fsck", "-e", NULL};
+
+	static const char* gnome_args[] = {"--title", "fsck", "--", "sh", "-c", NULL};
+	static const char* gnome_deps[] = {"dbus-launch", NULL};
+
+	static const char* konsole_args[] = {"--hold", "-p", "tabtitle=fsck", "-e", "sh", "-c", NULL};
+	static const char* xfce4_args[] = {"--title=fsck", "-x", "sh", "-c", NULL};
+	static const char* mate_args[] = {"--title", "fsck", "--", "sh", "-c", NULL};
+	static const char* lxterminal_args[] = {"--title=fsck", "-e", "sh", "-c", NULL};
+	static const char* terminator_args[] = {"-T", "fsck", "-x", "sh", "-c", NULL};
+	static const char* urxvt_args[] = {"-title", "fsck", "-e", "sh", "-c", NULL};
+	static const char* st_args[] = {"-t", "fsck", "-e", "sh", "-c", NULL};
+
+	// List of popular terminal emulators
+	static const TerminalInfo TERMINALS[] = {
+		{"xterm", xterm_args, NULL},
+		{"gnome-terminal", gnome_args, gnome_deps},
+		{"konsole", konsole_args, NULL},
+		{"xfce4-terminal", xfce4_args, NULL},
+		{"mate-terminal", mate_args, NULL},
+		{"lxterminal", lxterminal_args, NULL},
+		{"terminator", terminator_args, NULL},
+		{"urxvt", urxvt_args, NULL},
+		{"st", st_args, NULL},
+		{NULL, NULL, NULL}
+	};
+
 	CoreUnix::CoreUnix ()
 	{
 		signal (SIGPIPE, SIG_IGN);
@@ -42,14 +82,16 @@ namespace VeraCrypt
 		if (!mountedVolume->MountPoint.IsEmpty())
 			DismountFilesystem (mountedVolume->MountPoint, false);
 
+		// Find system fsck first
+		std::string errorMsg;
+		std::string fsckPath = Process::FindSystemBinary("fsck", errorMsg);
+		if (fsckPath.empty()) {
+			throw SystemException(SRC_POS, errorMsg);
+		}
+
 		list <string> args;
 
-		args.push_back ("-T");
-		args.push_back ("fsck");
-
-		args.push_back ("-e");
-
-		string xargs = "fsck ";
+		string xargs = fsckPath + " ";  // Use absolute fsck path
 
 #ifdef TC_LINUX
 		if (!repair)
@@ -59,37 +101,48 @@ namespace VeraCrypt
 #endif
 
 		xargs += string (mountedVolume->VirtualDevice) + "; echo '[Done]'; read W";
-		args.push_back (xargs);
+		// Try each terminal
+		for (const TerminalInfo* term = TERMINALS; term->name != NULL; ++term) {
+			errno = 0;
+			std::string termPath = Process::FindSystemBinary(term->name, errorMsg);
+			if (termPath.length() > 0) {
+				// check dependencies
+				if (term->dependency_path) {
+					bool depFound = true;
+					for (const char** dep = term->dependency_path; *dep != NULL; ++dep) {
+						string depPath = Process::FindSystemBinary(*dep, errorMsg);
+						if (depPath.empty()) {
+							depFound = false;
+							break;
+						}
+					}
 
-		try
-		{
-			Process::Execute ("xterm", args, 1000);
-		} catch (TimeOut&) { }
-#ifdef TC_LINUX
-		catch (SystemException&)
-		{
-			// xterm not available. Try with KDE konsole if it exists
-			struct stat sb;
-			if (stat("/usr/bin/konsole", &sb) == 0)
-			{
-				args.clear ();
-				args.push_back ("--title");
-				args.push_back ("fsck");
-				args.push_back ("--caption");
-				args.push_back ("fsck");
-				args.push_back ("-e");
-				args.push_back ("sh");
-				args.push_back ("-c");
-				args.push_back (xargs);
-				try
-				{
-					Process::Execute ("konsole", args, 1000);
-				} catch (TimeOut&) { }
+					if (!depFound) {
+						continue; // dependency not found, skip 
+					}
+				}
+
+				// Build args
+				std::list<std::string> args;
+				for (const char** arg = term->args; *arg != NULL; ++arg) {
+					args.push_back(*arg);
+				}
+				args.push_back(xargs);
+
+				try {
+					Process::Execute (termPath, args, 1000);
+					return;
+				}
+				catch (TimeOut&) {
+					return;
+				}
+				catch (SystemException&) {
+					// Continue to next terminal
+				}
 			}
-			else
-				throw;
 		}
-#endif
+
+		throw TerminalNotFound();
 	}
 
 	void CoreUnix::DismountFilesystem (const DirectoryPath &mountPoint, bool force) const
@@ -224,7 +277,7 @@ namespace VeraCrypt
 		device.SeekAt (0);
 		device.ReadCompleteBuffer (bootSector);
 
-		byte *b = bootSector.Ptr();
+		uint8 *b = bootSector.Ptr();
 
 		return memcmp (b + 3,  "NTFS", 4) != 0
 			&& memcmp (b + 54, "FAT", 3) != 0
@@ -240,7 +293,10 @@ namespace VeraCrypt
 
 		if (FilesystemPath ("/media").IsDirectory())
 			return "/media/veracrypt";
-
+#ifdef TC_LINUX
+		if (FilesystemPath ("/run/media").IsDirectory())
+			return "/run/media/veracrypt";
+#endif
 		if (FilesystemPath ("/mnt").IsDirectory())
 			return "/mnt/veracrypt";
 
@@ -286,17 +342,45 @@ namespace VeraCrypt
 				continue;
 
 			shared_ptr <VolumeInfo> mountedVol;
-			try
+			// Introduce a retry mechanism with a timeout for control file access
+			// This workaround is limited to FUSE-T mounted volume under macOS for
+			// which md.Device starts with "fuse-t:"
+#ifdef VC_MACOSX_FUSET
+			bool isFuseT = wstring(mf.Device).find(L"fuse-t:") == 0;
+			int controlFileRetries = 10; // 10 retries with 500ms sleep each, total 5 seconds
+			while (!mountedVol && (controlFileRetries-- > 0))
+#endif
 			{
-				shared_ptr <File> controlFile (new File);
-				controlFile->Open (string (mf.MountPoint) + FuseService::GetControlPath());
+				try 
+				{
+					shared_ptr <File> controlFile (new File);
+					controlFile->Open (string (mf.MountPoint) + FuseService::GetControlPath());
 
-				shared_ptr <Stream> controlFileStream (new FileStream (controlFile));
-				mountedVol = Serializable::DeserializeNew <VolumeInfo> (controlFileStream);
+					shared_ptr <Stream> controlFileStream (new FileStream (controlFile));
+					mountedVol = Serializable::DeserializeNew <VolumeInfo> (controlFileStream);
+				}
+				catch (const std::exception& e)
+				{
+#ifdef VC_MACOSX_FUSET
+					// if exception starts with "VeraCrypt::Serializer::ValidateName", then 
+					// serialization is not ready yet and we need to wait before retrying
+					// this happens when FUSE-T is used under macOS and if it is the first time
+					// the volume is mounted
+					if (isFuseT && string (e.what()).find ("VeraCrypt::Serializer::ValidateName") != string::npos)
+					{
+						Thread::Sleep(500); // Wait before retrying
+					}
+					else
+					{
+						break; // Control file not found or other error
+					}
+#endif
+				}
 			}
-			catch (...)
+
+			if (!mountedVol) 
 			{
-				continue;
+				continue; // Skip to the next mounted filesystem
 			}
 
 			if (!volumePath.IsEmpty() && wstring (mountedVol->Path).compare (volumePath) != 0)
@@ -355,9 +439,98 @@ namespace VeraCrypt
 
 	string CoreUnix::GetTempDirectory () const
 	{
-		char *envDir = getenv ("TMPDIR");
-		return envDir ? envDir : "/tmp";
+		const char *tmpdir = getenv ("TMPDIR");
+		string envDir = tmpdir ? tmpdir : "/tmp";
+
+#ifdef TC_LINUX
+		/*
+		 * If pam_tmpdir.so is in use, a different temporary directory is
+		 * allocated for each user ID. We need to mount to the directory used
+		 * by the non-root user.
+		 */
+		if (getuid () == 0 && envDir.size () >= 2
+			&& envDir.substr (envDir.size () - 2) == "/0") {
+			string tmpuser = GetTmpUser ();
+			if (SamePath (envDir, tmpuser + "/0")) {
+				/* Substitute the sudo'ing user for 0 */
+				char uid[40];
+				FILE *fp = fopen ("/proc/self/loginuid", "r");
+				if (fp != NULL) {
+					if (fgets (uid, sizeof (uid), fp) != nullptr) {
+						envDir = tmpuser + "/" + uid;
+					}
+					fclose (fp);
+				}
+			}
+		}
+#endif
+
+		return envDir;
 	}
+
+#ifdef TC_LINUX
+	static string GetTmpUser ()
+	{
+		string tmpuser = "/tmp/user";
+		FILE *fp = fopen ("/etc/security/tmpdir.conf", "r");
+		if (fp == NULL) {
+			return tmpuser;
+		}
+		while (true) {
+			/* Parses the same way as pam_tmpdir */
+			char line[1024];
+			if (fgets (line, sizeof (line), fp) == nullptr) {
+				break;
+			}
+			if (line[0] == '#') {
+				continue;
+			}
+			size_t len = strlen (line);
+			if (len > 0 && line[len-1] == '\n') {
+				line[len-1] = '\0';
+			}
+			char *eq = strchr (line, '=');
+			if (eq == nullptr) {
+				continue;
+			}
+			*eq = '\0';
+			const char *key = line;
+			const char *value = eq + 1;
+			if (strcmp (key, "tmpdir") == 0) {
+				tmpuser = value;
+				break;
+			}
+		}
+		fclose (fp);
+		return tmpuser;
+	}
+
+	static bool SamePath (const string& path1, const string& path2)
+	{
+		size_t i1 = 0;
+		size_t i2 = 0;
+		while (i1 < path1.size () && i2 < path2.size ()) {
+			if (path1[i1] != path2[i2]) {
+				return false;
+			}
+			/* Any two substrings consisting entirely of slashes compare equal */
+			if (path1[i1] == '/') {
+				while (i1 < path1.size () && path1[i1] == '/') {
+					++i1;
+				}
+				while (i2 < path2.size () && path2[i2] == '/') {
+					++i2;
+				}
+			}
+			else
+			{
+				++i1;
+				++i2;
+			}
+		}
+		return (i1 == path1.size () && i2 == path2.size ());
+	}
+#endif
 
 	bool CoreUnix::IsMountPointAvailable (const DirectoryPath &mountPoint) const
 	{
@@ -426,6 +599,17 @@ namespace VeraCrypt
 		if (IsVolumeMounted (*options.Path))
 			throw VolumeAlreadyMounted (SRC_POS);
 
+		if (options.MountPoint && !options.MountPoint->IsEmpty())
+		{
+			// Reject if the mount point is a system directory
+			if (IsProtectedSystemDirectory(*options.MountPoint))
+				throw MountPointBlocked (SRC_POS);
+
+			// Reject if the mount point is in the user's PATH and the user has not explicitly allowed insecure mount points
+			if (!GetAllowInsecureMount() && IsDirectoryOnUserPath(*options.MountPoint))
+				throw MountPointNotAllowed (SRC_POS);
+		}
+
 		Cipher::EnableHwSupport (!options.NoHardwareCrypto);
 
 		shared_ptr <Volume> volume;
@@ -440,8 +624,8 @@ namespace VeraCrypt
 					options.Password,
 					options.Pim,
 					options.Kdf,
-					options.TrueCryptMode,
 					options.Keyfiles,
+					options.EMVSupportEnabled,
 					options.Protection,
 					options.ProtectionPassword,
 					options.ProtectionPim,
@@ -465,6 +649,7 @@ namespace VeraCrypt
 					continue;
 				}
 
+				options.Password.reset();
 				throw;
 			}
 
@@ -473,8 +658,10 @@ namespace VeraCrypt
 
 		if (options.Path->IsDevice())
 		{
-			if (volume->GetFile()->GetDeviceSectorSize() != volume->GetSectorSize())
-				throw ParameterIncorrect (SRC_POS);
+			const uint32 devSectorSize = volume->GetFile()->GetDeviceSectorSize();
+			const size_t volSectorSize = volume->GetSectorSize();
+			if (devSectorSize != volSectorSize)
+				throw DeviceSectorSizeMismatch (SRC_POS, StringConverter::ToWide(devSectorSize) + L" != " + StringConverter::ToWide((uint32) volSectorSize));
 		}
 
 		// Find a free mount point for FUSE service
@@ -582,7 +769,7 @@ namespace VeraCrypt
 				{
 					try
 					{
-						chown (mountPoint.c_str(), GetRealUserId(), GetRealGroupId());
+						throw_sys_sub_if (chown (mountPoint.c_str(), GetRealUserId(), GetRealGroupId()) == -1, mountPoint);
 					} catch (...) { }
 				}
 			}
@@ -654,5 +841,101 @@ namespace VeraCrypt
 		stringstream s;
 		s << GetDefaultMountPointPrefix() << slotNumber;
 		return s.str();
+	}
+
+	bool CoreUnix::IsProtectedSystemDirectory (const DirectoryPath &directory) const
+	{
+		static const char* systemDirs[] = {
+			"/usr",
+			"/bin",
+			"/sbin",
+			"/lib",
+#ifdef TC_LINUX
+			"/lib32",
+			"/lib64",
+			"/libx32",
+#endif
+			"/etc",
+			"/boot",
+			"/root",
+			"/proc",
+			"/sys",
+			"/dev",
+			NULL
+		};
+
+		// Resolve any symlinks in the path
+		string path(directory);
+		char* resolvedPathCStr = realpath(path.c_str(), NULL);
+		if (resolvedPathCStr)
+		{
+			path = resolvedPathCStr;
+			free(resolvedPathCStr); // Free the allocated memory
+		}
+
+		// reject of the path is the root directory "/"
+		if (path == "/")
+			return true;
+
+		// Check if resolved path matches any system directory
+		for (int i = 0; systemDirs[i] != NULL; ++i)
+		{
+			if (path == systemDirs[i] || path.find(string(systemDirs[i]) + "/") == 0)
+				return true;
+		}
+
+		return false;
+	}
+
+	bool CoreUnix::IsDirectoryOnUserPath(const DirectoryPath &directory) const
+	{
+		// Obtain the PATH environment variable
+		const char* pathEnv = UserEnvPATH.c_str();
+		if (!pathEnv[0])
+			return false;
+
+		// Resolve the given directory
+		string dirPath(directory);
+		char* resolvedDir = realpath(dirPath.c_str(), NULL);
+		if (resolvedDir)
+		{
+			dirPath = resolvedDir;
+			free(resolvedDir);
+		}
+
+		// Split PATH and compare each entry
+		stringstream ss(pathEnv);
+		string token;
+		while (getline(ss, token, ':'))
+		{
+			// remove any trailing slashes from the token
+			while (!token.empty() && token.back() == '/')
+				token.pop_back();
+
+			if (token.empty())
+				continue;
+
+			// check if the directory is the same as the entry or a subdirectory
+			if (dirPath == token || dirPath.find(token + "/") == 0)
+				return true;
+
+			// handle the case where the PATH entry is a symlink
+			char* resolvedEntry = realpath(token.c_str(), NULL);
+			if (!resolvedEntry)
+				continue; // skip to the next entry since the path does not exist
+
+			string entryPath(resolvedEntry);
+			free(resolvedEntry);
+
+			// remove any trailing slashes from the token
+			while (!entryPath.empty() && entryPath.back() == '/')
+				entryPath.pop_back();
+
+			// perform check again if the resolved path is different from the original (symlink)
+			if (dirPath == entryPath || dirPath.find(entryPath + "/") == 0)
+				return true;
+		}
+
+		return false;
 	}
 }

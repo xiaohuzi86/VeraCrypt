@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -92,6 +92,8 @@ typedef struct
 	int ProtectedHidVolPkcs5Prf;
 	int ProtectedHidVolPim;
 	wchar_t Label[33]; /* maximum label length is 32 for NTFS and 11 for FAT32 */
+	BOOL DisableMountManager;
+	BOOL SkipCachedPasswords;
 } MountOptions;
 
 #endif

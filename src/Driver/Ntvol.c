@@ -6,7 +6,7 @@
  Encryption for the Masses 2.02a, which is Copyright (c) 1998-2000 Paul Le Roux
  and which is governed by the 'License Agreement for Encryption for the Masses'
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages. */
@@ -43,21 +43,23 @@ NTSTATUS TCOpenVolume (PDEVICE_OBJECT DeviceObject,
 	       PWSTR pwszMountVolume,
 	       BOOL bRawDevice)
 {
-	FILE_STANDARD_INFORMATION FileStandardInfo;
+	FILE_STANDARD_INFORMATION FileStandardInfo = { 0 };
 	FILE_BASIC_INFORMATION FileBasicInfo;
 	OBJECT_ATTRIBUTES oaFileAttributes;
 	UNICODE_STRING FullFileName;
 	IO_STATUS_BLOCK IoStatusBlock;
 	PCRYPTO_INFO cryptoInfoPtr = NULL;
 	PCRYPTO_INFO tmpCryptoInfo = NULL;
-	LARGE_INTEGER lDiskLength;
+	LARGE_INTEGER lDiskLength = { 0 };
 	__int64 partitionStartingOffset = 0;
 	int volumeType;
-	char *readBuffer = 0;
+	unsigned char *readBuffer = 0;
 	NTSTATUS ntStatus = 0;
-	BOOL forceAccessCheck = (!bRawDevice && !(OsMajorVersion == 5 &&OsMinorVersion == 0)); // Windows 2000 does not support OBJ_FORCE_ACCESS_CHECK attribute
+	BOOL forceAccessCheck = !bRawDevice;
 	BOOL disableBuffering = TRUE;
 	BOOL exclusiveAccess = mount->bExclusiveAccess;
+	/* when mounting with hidden volume protection, we cache the passwords after both outer and hidden volumes are mounted successfully*/
+	BOOL bAutoCachePassword = mount->bProtectHiddenVolume? FALSE : mount->bCache;
 
 	Extension->pfoDeviceFile = NULL;
 	Extension->hDeviceFile = NULL;
@@ -86,6 +88,8 @@ NTSTATUS TCOpenVolume (PDEVICE_OBJECT DeviceObject,
 	}
 
 	mount->VolumeMountedReadOnlyAfterDeviceWriteProtected = FALSE;
+	mount->VolumeMountedReadOnlyAfterPartialSysEnc = FALSE;
+	mount->VolumeMasterKeyVulnerable = FALSE;
 
 	// If we are opening a device, query its size first
 	if (bRawDevice)
@@ -94,65 +98,62 @@ NTSTATUS TCOpenVolume (PDEVICE_OBJECT DeviceObject,
 		PARTITION_INFORMATION_EX pix;
 		LARGE_INTEGER diskLengthInfo;
 		DISK_GEOMETRY_EX dg;
-		STORAGE_PROPERTY_QUERY storagePropertyQuery = {0};
-		byte* dgBuffer;
+		STORAGE_PROPERTY_QUERY storagePropertyQuery = { 0 };
+		uint8* dgBuffer;
 		STORAGE_DEVICE_NUMBER storageDeviceNumber;
 
-		ntStatus = IoGetDeviceObjectPointer (&FullFileName,
+		ntStatus = IoGetDeviceObjectPointer(&FullFileName,
 			FILE_READ_DATA | FILE_READ_ATTRIBUTES,
 			&Extension->pfoDeviceFile,
 			&Extension->pFsdDevice);
 
-		if (!NT_SUCCESS (ntStatus))
+		if (!NT_SUCCESS(ntStatus))
 			goto error;
 
-		dgBuffer = TCalloc (256);
+		dgBuffer = TCalloc(256);
 		if (!dgBuffer)
 		{
 			ntStatus = STATUS_INSUFFICIENT_RESOURCES;
 			goto error;
 		}
 
-		ntStatus = TCSendHostDeviceIoControlRequest (DeviceObject, Extension, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, (char *) dgBuffer, 256);
-		if (!NT_SUCCESS (ntStatus))
+		ntStatus = TCSendHostDeviceIoControlRequest(DeviceObject, Extension, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, (char*)dgBuffer, 256);
+		if (!NT_SUCCESS(ntStatus))
 		{
 			DISK_GEOMETRY geo;
-			ntStatus = TCSendHostDeviceIoControlRequest (DeviceObject, Extension, IOCTL_DISK_GET_DRIVE_GEOMETRY, (char *) &geo, sizeof (geo));
-			if (!NT_SUCCESS (ntStatus))
+			ntStatus = TCSendHostDeviceIoControlRequest(DeviceObject, Extension, IOCTL_DISK_GET_DRIVE_GEOMETRY, (char*)&geo, sizeof(geo));
+			if (!NT_SUCCESS(ntStatus))
 			{
-				TCfree (dgBuffer);
+				TCfree(dgBuffer);
 				goto error;
 			}
-			memset (&dg, 0, sizeof (dg));
-			memcpy (&dg.Geometry, &geo, sizeof (geo));
+			memset(&dg, 0, sizeof(dg));
+			memcpy(&dg.Geometry, &geo, sizeof(geo));
 			dg.DiskSize.QuadPart = geo.Cylinders.QuadPart * geo.SectorsPerTrack * geo.TracksPerCylinder * geo.BytesPerSector;
 
-			if (OsMajorVersion >= 6)
-			{
-				STORAGE_READ_CAPACITY storage = {0};
-				NTSTATUS lStatus;
+			STORAGE_READ_CAPACITY storage = { 0 };
+			NTSTATUS lStatus;
 
-				storage.Version = sizeof (STORAGE_READ_CAPACITY);
-				storage.Size = sizeof (STORAGE_READ_CAPACITY);
-				lStatus = TCSendHostDeviceIoControlRequest (DeviceObject, Extension,
-					IOCTL_STORAGE_READ_CAPACITY,
-					(char*)  &storage, sizeof (STORAGE_READ_CAPACITY));
-				if (	NT_SUCCESS(lStatus)
-					&& (storage.Size == sizeof (STORAGE_READ_CAPACITY))
-					)
-				{
-					dg.DiskSize.QuadPart = storage.DiskLength.QuadPart;
-				}
+			storage.Version = sizeof(STORAGE_READ_CAPACITY);
+			storage.Size = sizeof(STORAGE_READ_CAPACITY);
+			lStatus = TCSendHostDeviceIoControlRequest(DeviceObject, Extension,
+				IOCTL_STORAGE_READ_CAPACITY,
+				(char*)&storage, sizeof(STORAGE_READ_CAPACITY));
+			if (NT_SUCCESS(lStatus)
+				&& (storage.Size == sizeof(STORAGE_READ_CAPACITY))
+				)
+			{
+				dg.DiskSize.QuadPart = storage.DiskLength.QuadPart;
 			}
 		}
 		else
-			memcpy (&dg, dgBuffer, sizeof (DISK_GEOMETRY_EX));
+			memcpy(&dg, dgBuffer, sizeof(DISK_GEOMETRY_EX));
 
-		TCfree (dgBuffer);
+		TCfree(dgBuffer);
 
-		if (NT_SUCCESS (TCSendHostDeviceIoControlRequest (DeviceObject, Extension,
-					IOCTL_STORAGE_GET_DEVICE_NUMBER,
-					(char*) &storageDeviceNumber, sizeof (storageDeviceNumber))))
+		if (NT_SUCCESS(TCSendHostDeviceIoControlRequest(DeviceObject, Extension,
+			IOCTL_STORAGE_GET_DEVICE_NUMBER,
+			(char*)&storageDeviceNumber, sizeof(storageDeviceNumber))))
 		{
 			Extension->DeviceNumber = storageDeviceNumber.DeviceNumber;
 		}
@@ -161,76 +162,72 @@ NTSTATUS TCOpenVolume (PDEVICE_OBJECT DeviceObject,
 		Extension->HostBytesPerSector = dg.Geometry.BytesPerSector;
 		Extension->HostBytesPerPhysicalSector = dg.Geometry.BytesPerSector;
 
-		/* IOCTL_STORAGE_QUERY_PROPERTY supported only on Vista and above */
-		if (OsMajorVersion >= 6)
+		STORAGE_ACCESS_ALIGNMENT_DESCRIPTOR alignmentDesc = { 0 };
+		STORAGE_ADAPTER_DESCRIPTOR adapterDesc = { 0 };
+		DEVICE_SEEK_PENALTY_DESCRIPTOR penaltyDesc = { 0 };
+		DEVICE_TRIM_DESCRIPTOR trimDesc = { 0 };
+
+		storagePropertyQuery.PropertyId = StorageAccessAlignmentProperty;
+		storagePropertyQuery.QueryType = PropertyStandardQuery;
+
+		alignmentDesc.Version = sizeof(STORAGE_ACCESS_ALIGNMENT_DESCRIPTOR);
+		alignmentDesc.Size = sizeof(STORAGE_ACCESS_ALIGNMENT_DESCRIPTOR);
+
+		if (NT_SUCCESS(TCSendHostDeviceIoControlRequestEx(DeviceObject, Extension, IOCTL_STORAGE_QUERY_PROPERTY,
+			(char*)&storagePropertyQuery, sizeof(storagePropertyQuery),
+			(char*)&alignmentDesc, sizeof(alignmentDesc))))
 		{
-			STORAGE_ACCESS_ALIGNMENT_DESCRIPTOR alignmentDesc = {0};
-			STORAGE_ADAPTER_DESCRIPTOR adapterDesc = {0};
-			DEVICE_SEEK_PENALTY_DESCRIPTOR penaltyDesc = {0};
-			DEVICE_TRIM_DESCRIPTOR trimDesc = {0};
+			Extension->HostBytesPerPhysicalSector = alignmentDesc.BytesPerPhysicalSector;
+		}
 
-			storagePropertyQuery.PropertyId = StorageAccessAlignmentProperty;
-			storagePropertyQuery.QueryType = PropertyStandardQuery;
+		storagePropertyQuery.PropertyId = StorageAdapterProperty;
+		adapterDesc.Version = sizeof(STORAGE_ADAPTER_DESCRIPTOR);
+		adapterDesc.Size = sizeof(STORAGE_ADAPTER_DESCRIPTOR);
 
-			alignmentDesc.Version = sizeof (STORAGE_ACCESS_ALIGNMENT_DESCRIPTOR);
-			alignmentDesc.Size = sizeof (STORAGE_ACCESS_ALIGNMENT_DESCRIPTOR);
+		if (NT_SUCCESS(TCSendHostDeviceIoControlRequestEx(DeviceObject, Extension, IOCTL_STORAGE_QUERY_PROPERTY,
+			(char*)&storagePropertyQuery, sizeof(storagePropertyQuery),
+			(char*)&adapterDesc, sizeof(adapterDesc))))
+		{
+			Extension->HostMaximumTransferLength = adapterDesc.MaximumTransferLength;
+			Extension->HostMaximumPhysicalPages = adapterDesc.MaximumPhysicalPages;
+			Extension->HostAlignmentMask = adapterDesc.AlignmentMask;
+		}
 
-			if (NT_SUCCESS (TCSendHostDeviceIoControlRequestEx (DeviceObject, Extension, IOCTL_STORAGE_QUERY_PROPERTY,
-				(char*) &storagePropertyQuery, sizeof(storagePropertyQuery),
-				(char *) &alignmentDesc, sizeof (alignmentDesc))))
-			{
-				Extension->HostBytesPerPhysicalSector = alignmentDesc.BytesPerPhysicalSector;
-			}
+		storagePropertyQuery.PropertyId = StorageDeviceSeekPenaltyProperty;
+		penaltyDesc.Version = sizeof(DEVICE_SEEK_PENALTY_DESCRIPTOR);
+		penaltyDesc.Size = sizeof(DEVICE_SEEK_PENALTY_DESCRIPTOR);
 
-			storagePropertyQuery.PropertyId = StorageAdapterProperty;
-			adapterDesc.Version = sizeof (STORAGE_ADAPTER_DESCRIPTOR);
-			adapterDesc.Size = sizeof (STORAGE_ADAPTER_DESCRIPTOR);
+		if (NT_SUCCESS(TCSendHostDeviceIoControlRequestEx(DeviceObject, Extension, IOCTL_STORAGE_QUERY_PROPERTY,
+			(char*)&storagePropertyQuery, sizeof(storagePropertyQuery),
+			(char*)&penaltyDesc, sizeof(penaltyDesc))))
+		{
+			Extension->IncursSeekPenalty = penaltyDesc.IncursSeekPenalty;
+		}
 
-			if (NT_SUCCESS (TCSendHostDeviceIoControlRequestEx (DeviceObject, Extension, IOCTL_STORAGE_QUERY_PROPERTY,
-				(char*) &storagePropertyQuery, sizeof(storagePropertyQuery),
-				(char *) &adapterDesc, sizeof (adapterDesc))))
-			{
-				Extension->HostMaximumTransferLength = adapterDesc.MaximumTransferLength;
-				Extension->HostMaximumPhysicalPages = adapterDesc.MaximumPhysicalPages;
-				Extension->HostAlignmentMask = adapterDesc.AlignmentMask;
-			}
+		storagePropertyQuery.PropertyId = StorageDeviceTrimProperty;
+		trimDesc.Version = sizeof(DEVICE_TRIM_DESCRIPTOR);
+		trimDesc.Size = sizeof(DEVICE_TRIM_DESCRIPTOR);
 
-			storagePropertyQuery.PropertyId = StorageDeviceSeekPenaltyProperty;
-			penaltyDesc.Version = sizeof (DEVICE_SEEK_PENALTY_DESCRIPTOR);
-			penaltyDesc.Size = sizeof (DEVICE_SEEK_PENALTY_DESCRIPTOR);
-
-			if (NT_SUCCESS (TCSendHostDeviceIoControlRequestEx (DeviceObject, Extension, IOCTL_STORAGE_QUERY_PROPERTY,
-				(char*) &storagePropertyQuery, sizeof(storagePropertyQuery),
-				(char *) &penaltyDesc, sizeof (penaltyDesc))))
-			{
-				Extension->IncursSeekPenalty = penaltyDesc.IncursSeekPenalty;
-			}
-
-			storagePropertyQuery.PropertyId = StorageDeviceTrimProperty;
-			trimDesc.Version = sizeof (DEVICE_TRIM_DESCRIPTOR);
-			trimDesc.Size = sizeof (DEVICE_TRIM_DESCRIPTOR);
-
-			if (NT_SUCCESS (TCSendHostDeviceIoControlRequestEx (DeviceObject, Extension, IOCTL_STORAGE_QUERY_PROPERTY,
-				(char*) &storagePropertyQuery, sizeof(storagePropertyQuery),
-				(char *) &trimDesc, sizeof (trimDesc))))
-			{
-				Extension->TrimEnabled = trimDesc.TrimEnabled;
-			}
+		if (NT_SUCCESS(TCSendHostDeviceIoControlRequestEx(DeviceObject, Extension, IOCTL_STORAGE_QUERY_PROPERTY,
+			(char*)&storagePropertyQuery, sizeof(storagePropertyQuery),
+			(char*)&trimDesc, sizeof(trimDesc))))
+		{
+			Extension->TrimEnabled = trimDesc.TrimEnabled;
 		}
 
 		// Drive geometry is used only when IOCTL_DISK_GET_PARTITION_INFO fails
-		if (NT_SUCCESS (TCSendHostDeviceIoControlRequest (DeviceObject, Extension, IOCTL_DISK_GET_PARTITION_INFO_EX, (char *) &pix, sizeof (pix))))
+		if (NT_SUCCESS(TCSendHostDeviceIoControlRequest(DeviceObject, Extension, IOCTL_DISK_GET_PARTITION_INFO_EX, (char*)&pix, sizeof(pix))))
 		{
 			lDiskLength.QuadPart = pix.PartitionLength.QuadPart;
 			partitionStartingOffset = pix.StartingOffset.QuadPart;
 		}
-		// Windows 2000 does not support IOCTL_DISK_GET_PARTITION_INFO_EX
-		else if (NT_SUCCESS (TCSendHostDeviceIoControlRequest (DeviceObject, Extension, IOCTL_DISK_GET_PARTITION_INFO, (char *) &pi, sizeof (pi))))
+		// If IOCTL_DISK_GET_PARTITION_INFO_EX fails, switch to IOCTL_DISK_GET_PARTITION_INFO
+		else if (NT_SUCCESS(TCSendHostDeviceIoControlRequest(DeviceObject, Extension, IOCTL_DISK_GET_PARTITION_INFO, (char*)&pi, sizeof(pi))))
 		{
 			lDiskLength.QuadPart = pi.PartitionLength.QuadPart;
 			partitionStartingOffset = pi.StartingOffset.QuadPart;
 		}
-		else if (NT_SUCCESS (TCSendHostDeviceIoControlRequest (DeviceObject, Extension, IOCTL_DISK_GET_LENGTH_INFO, &diskLengthInfo, sizeof (diskLengthInfo))))
+		else if (NT_SUCCESS(TCSendHostDeviceIoControlRequest(DeviceObject, Extension, IOCTL_DISK_GET_LENGTH_INFO, &diskLengthInfo, sizeof(diskLengthInfo))))
 		{
 			lDiskLength = diskLengthInfo;
 		}
@@ -238,7 +235,7 @@ NTSTATUS TCOpenVolume (PDEVICE_OBJECT DeviceObject,
 		ProbingHostDeviceForWrite = TRUE;
 
 		if (!mount->bMountReadOnly
-			&& TCSendHostDeviceIoControlRequest (DeviceObject, Extension,
+			&& TCSendHostDeviceIoControlRequest(DeviceObject, Extension,
 				IsHiddenSystemRunning() ? TC_IOCTL_DISK_IS_WRITABLE : IOCTL_DISK_IS_WRITABLE, NULL, 0) == STATUS_MEDIA_WRITE_PROTECTED)
 		{
 			mount->bMountReadOnly = TRUE;
@@ -303,7 +300,7 @@ NTSTATUS TCOpenVolume (PDEVICE_OBJECT DeviceObject,
 	if (mount->bMountReadOnly || ntStatus == STATUS_ACCESS_DENIED)
 	{
 		ntStatus = ZwCreateFile (&Extension->hDeviceFile,
-			GENERIC_READ | SYNCHRONIZE,
+			GENERIC_READ | (!bRawDevice && mount->bPreserveTimestamp? FILE_WRITE_ATTRIBUTES : 0) | SYNCHRONIZE,
 			&oaFileAttributes,
 			&IoStatusBlock,
 			NULL,
@@ -317,6 +314,26 @@ NTSTATUS TCOpenVolume (PDEVICE_OBJECT DeviceObject,
 			FILE_SYNCHRONOUS_IO_NONALERT,
 			NULL,
 			0);
+
+		if (!NT_SUCCESS (ntStatus) && !bRawDevice && mount->bPreserveTimestamp)
+		{
+			/* try again without FILE_WRITE_ATTRIBUTES */
+			ntStatus = ZwCreateFile (&Extension->hDeviceFile,
+				GENERIC_READ | SYNCHRONIZE,
+				&oaFileAttributes,
+				&IoStatusBlock,
+				NULL,
+				FILE_ATTRIBUTE_NORMAL |
+				FILE_ATTRIBUTE_SYSTEM,
+				exclusiveAccess ? FILE_SHARE_READ : FILE_SHARE_READ | FILE_SHARE_WRITE,
+				FILE_OPEN,
+				FILE_RANDOM_ACCESS |
+				FILE_WRITE_THROUGH |
+				(disableBuffering ? FILE_NO_INTERMEDIATE_BUFFERING : 0) |
+				FILE_SYNCHRONOUS_IO_NONALERT,
+				NULL,
+				0);
+		}
 
 		if (NT_SUCCESS (ntStatus) && !mount->bMountReadOnly)
 			mount->VolumeMountedReadOnlyAfterAccessDenied = TRUE;
@@ -362,6 +379,18 @@ NTSTATUS TCOpenVolume (PDEVICE_OBJECT DeviceObject,
 				Extension->fileLastWriteTime = FileBasicInfo.LastWriteTime;
 				Extension->fileLastChangeTime = FileBasicInfo.ChangeTime;
 				Extension->bTimeStampValid = TRUE;
+
+				// we tell the system not to update LastAccessTime, LastWriteTime, and ChangeTime
+				FileBasicInfo.CreationTime.QuadPart = 0;
+				FileBasicInfo.LastAccessTime.QuadPart = -1;
+				FileBasicInfo.LastWriteTime.QuadPart = -1;
+				FileBasicInfo.ChangeTime.QuadPart = -1;
+
+				ZwSetInformationFile (Extension->hDeviceFile,
+					&IoStatusBlock,
+					&FileBasicInfo,
+					sizeof (FileBasicInfo),
+					FileBasicInformation);
 			}
 
 			ntStatus = ZwQueryInformationFile (Extension->hDeviceFile,
@@ -452,7 +481,7 @@ NTSTATUS TCOpenVolume (PDEVICE_OBJECT DeviceObject,
 			// Header of a volume that is not within the scope of system encryption, or
 			// header of a system hidden volume (containing a hidden OS)
 
-			LARGE_INTEGER headerOffset;
+			LARGE_INTEGER headerOffset = {0};
 
 			if (mount->UseBackupHeader && lDiskLength.QuadPart <= TC_TOTAL_VOLUME_HEADERS_SIZE)
 				continue;
@@ -570,26 +599,24 @@ NTSTATUS TCOpenVolume (PDEVICE_OBJECT DeviceObject,
 		{
 			mount->nReturnCode = ReadVolumeHeaderWCache (
 				FALSE,
-				mount->bCache,
+				bAutoCachePassword,
 				mount->bCachePim,
 				readBuffer,
 				&mount->ProtectedHidVolPassword,
 				mount->ProtectedHidVolPkcs5Prf,
 				mount->ProtectedHidVolPim,
-				mount->bTrueCryptMode,
 				&tmpCryptoInfo);
 		}
 		else
 		{
 			mount->nReturnCode = ReadVolumeHeaderWCache (
 				mount->bPartitionInInactiveSysEncScope && volumeType == TC_VOLUME_TYPE_NORMAL,
-				mount->bCache,
+				bAutoCachePassword,
 				mount->bCachePim,
 				readBuffer,
 				&mount->VolumePassword,
 				mount->pkcs5_prf,
 				mount->VolumePim,
-				mount->bTrueCryptMode,
 				&Extension->cryptoInfo);
 		}
 
@@ -607,9 +634,15 @@ NTSTATUS TCOpenVolume (PDEVICE_OBJECT DeviceObject,
 				goto error;
 			}
 
+			if (IsRamEncryptionEnabled() && (volumeType == TC_VOLUME_TYPE_NORMAL || !mount->bProtectHiddenVolume))
+				VcProtectKeys (Extension->cryptoInfo, VcGetEncryptionID (Extension->cryptoInfo));
+
 			Dump ("Volume header decrypted\n");
 			Dump ("Required program version = %x\n", (int) Extension->cryptoInfo->RequiredProgramVersion);
 			Dump ("Legacy volume = %d\n", (int) Extension->cryptoInfo->LegacyVolume);
+			Dump ("Master key vulnerable = %d\n", (int) Extension->cryptoInfo->bVulnerableMasterKey);
+
+			mount->VolumeMasterKeyVulnerable = Extension->cryptoInfo->bVulnerableMasterKey;
 
 			if (IsHiddenSystemRunning() && !Extension->cryptoInfo->hiddenVolume)
 			{
@@ -640,10 +673,9 @@ NTSTATUS TCOpenVolume (PDEVICE_OBJECT DeviceObject,
 
 					if (Extension->cryptoInfo->EncryptedAreaLength.Value != Extension->cryptoInfo->VolumeSize.Value)
 					{
-						// Partial encryption is not supported for volumes mounted as regular
-						mount->nReturnCode = ERR_ENCRYPTION_NOT_COMPLETED;
-						ntStatus = STATUS_SUCCESS;
-						goto error;
+						// mount as readonly in case of partial system encryption
+						Extension->bReadOnly = mount->bMountReadOnly = TRUE;
+						mount->VolumeMountedReadOnlyAfterPartialSysEnc = TRUE;
 					}
 				}
 				else if (Extension->cryptoInfo->HeaderFlags & TC_HEADER_FLAG_NONSYS_INPLACE_ENC)
@@ -663,7 +695,7 @@ NTSTATUS TCOpenVolume (PDEVICE_OBJECT DeviceObject,
 			if (Extension->cryptoInfo->hiddenVolume && IsHiddenSystemRunning())
 			{
 				// Prevent mount of a hidden system partition if the system hosted on it is currently running
-				if (memcmp (Extension->cryptoInfo->master_keydata, GetSystemDriveCryptoInfo()->master_keydata, EAGetKeySize (Extension->cryptoInfo->ea)) == 0)
+				if (memcmp (Extension->cryptoInfo->master_keydata_hash, GetSystemDriveCryptoInfo()->master_keydata_hash, sizeof(Extension->cryptoInfo->master_keydata_hash)) == 0)
 				{
 					mount->nReturnCode = ERR_VOL_ALREADY_MOUNTED;
 					ntStatus = STATUS_SUCCESS;
@@ -761,8 +793,7 @@ NTSTATUS TCOpenVolume (PDEVICE_OBJECT DeviceObject,
 				Extension->TracksPerCylinder = 1;
 				Extension->SectorsPerTrack = 1;
 				Extension->BytesPerSector = Extension->cryptoInfo->SectorSize;
-				// Add extra sector since our virtual partition starts at Extension->BytesPerSector and not 0
-				Extension->NumberOfCylinders = (Extension->DiskLength / Extension->BytesPerSector) + 1;
+				Extension->NumberOfCylinders = Extension->DiskLength / Extension->BytesPerSector;
 				Extension->PartitionType = 0;
 
 				Extension->bRawDevice = bRawDevice;
@@ -789,6 +820,13 @@ NTSTATUS TCOpenVolume (PDEVICE_OBJECT DeviceObject,
 			// decrypt the hidden volume header.
 			if (!(volumeType == TC_VOLUME_TYPE_NORMAL && mount->bProtectHiddenVolume))
 			{
+				/* in case of mounting with hidden volume protection, we cache both passwords manually after bother outer and hidden volumes are mounted*/
+				if (mount->bProtectHiddenVolume && mount->bCache)
+				{
+					AddPasswordToCache(&mount->VolumePassword, mount->VolumePim, mount->bCachePim);
+					AddPasswordToCache(&mount->ProtectedHidVolPassword, mount->ProtectedHidVolPim, mount->bCachePim);
+				}
+
 				TCfree (readBuffer);
 
 				if (tmpCryptoInfo != NULL)
@@ -881,6 +919,19 @@ void TCCloseVolume (PDEVICE_OBJECT DeviceObject, PEXTENSION Extension)
 	}
 }
 
+typedef struct
+{
+	PDEVICE_OBJECT deviceObject; PEXTENSION Extension; ULONG ioControlCode; void *inputBuffer; int inputBufferSize; void *outputBuffer; int outputBufferSize;
+	NTSTATUS Status;
+	KEVENT WorkItemCompletedEvent;
+} TCSendHostDeviceIoControlRequestExWorkItemArgs;
+
+static VOID TCSendHostDeviceIoControlRequestExWorkItemRoutine (PDEVICE_OBJECT rootDeviceObject, TCSendHostDeviceIoControlRequestExWorkItemArgs *arg)
+{
+	UNREFERENCED_PARAMETER(rootDeviceObject);	/* Remove compiler warning */
+	arg->Status = TCSendHostDeviceIoControlRequestEx (arg->deviceObject, arg->Extension, arg->ioControlCode, arg->inputBuffer, arg->inputBufferSize, arg->outputBuffer, arg->outputBufferSize);
+	KeSetEvent (&arg->WorkItemCompletedEvent, IO_NO_INCREMENT, FALSE);
+}
 
 NTSTATUS TCSendHostDeviceIoControlRequestEx (PDEVICE_OBJECT DeviceObject,
 			       PEXTENSION Extension,
@@ -895,6 +946,31 @@ NTSTATUS TCSendHostDeviceIoControlRequestEx (PDEVICE_OBJECT DeviceObject,
 	PIRP Irp;
 
 	UNREFERENCED_PARAMETER(DeviceObject);	/* Remove compiler warning */
+
+	if ((KeGetCurrentIrql() >= APC_LEVEL) || KeAreAllApcsDisabled())
+	{
+		TCSendHostDeviceIoControlRequestExWorkItemArgs args;
+
+		PIO_WORKITEM workItem = IoAllocateWorkItem (RootDeviceObject);
+		if (!workItem)
+			return STATUS_INSUFFICIENT_RESOURCES;
+
+		args.deviceObject = DeviceObject;
+		args.Extension = Extension;
+		args.ioControlCode = IoControlCode;
+		args.inputBuffer = InputBuffer;
+		args.inputBufferSize = InputBufferSize;
+		args.outputBuffer = OutputBuffer;
+		args.outputBufferSize = OutputBufferSize;
+
+		KeInitializeEvent (&args.WorkItemCompletedEvent, SynchronizationEvent, FALSE);
+		IoQueueWorkItem (workItem, TCSendHostDeviceIoControlRequestExWorkItemRoutine, DelayedWorkQueue, &args);
+
+		KeWaitForSingleObject (&args.WorkItemCompletedEvent, Executive, KernelMode, FALSE, NULL);
+		IoFreeWorkItem (workItem);
+
+		return args.Status;
+	}
 
 	KeClearEvent (&Extension->keVolumeEvent);
 

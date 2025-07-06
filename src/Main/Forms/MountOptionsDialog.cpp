@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -34,6 +34,9 @@ namespace VeraCrypt
 		, wxDefaultPosition, wxSize (-1,-1), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER
 #endif
 		), Options (options)
+#ifdef TC_UNIX
+		, m_showRedBorder(false)
+#endif
 	{
 		if (!title.empty())
 			this->SetTitle (title);
@@ -41,6 +44,16 @@ namespace VeraCrypt
 			this->SetTitle (StringFormatter (LangString["ENTER_PASSWORD_FOR"], wstring (*options.Path)));
 		else
 			this->SetTitle (LangString["ENTER_TC_VOL_PASSWORD"]);
+
+#ifdef TC_UNIX
+		if (Gui->InsecureMountAllowed())
+		{
+			this->SetTitle (LangString["INSECURE_MODE"] + L" - " + this->GetTitle());
+			m_showRedBorder = true;
+			Bind(wxEVT_PAINT, &MountOptionsDialog::OnPaint, this);  
+			Bind(wxEVT_SIZE, &MountOptionsDialog::OnSize, this);
+		}
+#endif
 
 		if (disableMountOptions)
 			OptionsButton->Show (false);
@@ -50,14 +63,8 @@ namespace VeraCrypt
 		GraphicUserInterface::InstallPasswordEntryCustomKeyboardShortcuts (this);
 #endif
 
-		PasswordPanel = new VolumePasswordPanel (this, &options, options.Password, disableMountOptions, options.Keyfiles, !disableMountOptions, true, true, false, true, true);
+		PasswordPanel = new VolumePasswordPanel (this, &options, options.Password, options.Keyfiles, !disableMountOptions, true, true, false, true, true);
 		PasswordPanel->SetCacheCheckBoxValidator (wxGenericValidator (&Options.CachePassword));
-		
-		if (options.Path && options.Path->HasTrueCryptExtension() && !disableMountOptions 
-			&& !options.TrueCryptMode && (options.Pim <= 0))
-		{
-			PasswordPanel->SetTrueCryptMode (true);	
-		}
 
 		PasswordSizer->Add (PasswordPanel, 1, wxALL | wxEXPAND);
 
@@ -88,7 +95,8 @@ namespace VeraCrypt
 		OptionsButton->SetLabel (OptionsButtonLabel + L" >");
 		OptionsPanel->Show (false);
 
-		ProtectionPasswordPanel = new VolumePasswordPanel (OptionsPanel, &options, options.ProtectionPassword, true, options.ProtectionKeyfiles, false, true, true, false, true, true, _("P&assword to hidden volume:"));
+		ProtectionPasswordPanel = new VolumePasswordPanel (ProtectionSizer->GetStaticBox(), &options, options.ProtectionPassword, options.ProtectionKeyfiles, false, true, true, false, true, true, LangString["IDT_HIDDEN_PROT_PASSWD"]);
+		ProtectionPasswordPanel->TopOwnerParent = this;
 		ProtectionPasswordSizer->Add (ProtectionPasswordPanel, 1, wxALL | wxEXPAND);
 
 		UpdateDialog();
@@ -109,8 +117,6 @@ namespace VeraCrypt
 
 	void MountOptionsDialog::OnOKButtonClick (wxCommandEvent& event)
 	{
-		bool bUnsupportedKdf = false;
-
 		/* verify that PIM values are valid before continuing*/
 		int Pim = PasswordPanel->GetVolumePim();
 		int ProtectionPim = (!ReadOnlyCheckBox->IsChecked() && ProtectionCheckBox->IsChecked())?
@@ -133,21 +139,22 @@ namespace VeraCrypt
 
 		try
 		{
-			Options.Password = PasswordPanel->GetPassword();
+			Options.Password = PasswordPanel->GetPassword(Options.PartitionInSystemEncryptionScope);
 		}
 		catch (PasswordException& e)
 		{
 			Gui->ShowWarning (e);
 			return;
 		}
-		Options.Pim = Pim;
-		Options.Kdf = PasswordPanel->GetPkcs5Kdf(bUnsupportedKdf);
-		if (bUnsupportedKdf)
+		
+		if (Options.PartitionInSystemEncryptionScope && Options.Password->Size() > VolumePassword::MaxLegacySize)
 		{
-			Gui->ShowWarning (LangString ["ALGO_NOT_SUPPORTED_FOR_TRUECRYPT_MODE"]);
+			Gui->ShowWarning (StringFormatter (LangString["LINUX_SYSTEM_ENC_PW_LENGTH_NOTE"], (int) VolumePassword::MaxLegacySize));
 			return;
 		}
-		Options.TrueCryptMode = PasswordPanel->GetTrueCryptMode();
+		
+		Options.Pim = Pim;
+		Options.Kdf = PasswordPanel->GetPkcs5Kdf();
 		Options.Keyfiles = PasswordPanel->GetKeyfiles();
 
 		if (ReadOnlyCheckBox->IsChecked())
@@ -158,7 +165,7 @@ namespace VeraCrypt
 		{
 			try
 			{
-				Options.ProtectionPassword = ProtectionPasswordPanel->GetPassword();
+				Options.ProtectionPassword = ProtectionPasswordPanel->GetPassword(false);
 			}
 			catch (PasswordException& e)
 			{
@@ -167,12 +174,7 @@ namespace VeraCrypt
 			}
 			Options.Protection = VolumeProtection::HiddenVolumeReadOnly;
 			Options.ProtectionPim = ProtectionPim;
-			Options.ProtectionKdf = ProtectionPasswordPanel->GetPkcs5Kdf(Options.TrueCryptMode, bUnsupportedKdf);
-			if (bUnsupportedKdf)
-			{
-				Gui->ShowWarning (LangString ["ALGO_NOT_SUPPORTED_FOR_TRUECRYPT_MODE"]);
-				return;
-			}
+			Options.ProtectionKdf = ProtectionPasswordPanel->GetPkcs5Kdf();
 			Options.ProtectionKeyfiles = ProtectionPasswordPanel->GetKeyfiles();
 		}
 		else
@@ -185,6 +187,7 @@ namespace VeraCrypt
 			Options.MountPoint = make_shared <DirectoryPath> (mountPoint);
 
 		Options.FilesystemOptions = FilesystemOptionsTextCtrl->GetValue();
+		Options.EMVSupportEnabled = Gui->GetPreferences().EMVSupportEnabled;
 
 		EndModal (wxID_OK);
 	}
@@ -240,4 +243,27 @@ namespace VeraCrypt
 		Layout();
 		MainSizer->Fit( this );
 	}
+
+#ifdef TC_UNIX
+	void MountOptionsDialog::OnPaint(wxPaintEvent& event)  
+	{  
+		wxPaintDC dc(this);  
+		if (m_showRedBorder)  
+		{  
+			wxSize size = GetClientSize();  
+			wxPen pen(*wxRED, 3); // 3 pixels width  
+			dc.SetPen(pen);  
+			dc.SetBrush(*wxTRANSPARENT_BRUSH);  
+			dc.DrawRectangle(0, 0, size.GetWidth(), size.GetHeight());  
+		}  
+		event.Skip();  
+	}  
+	
+	void MountOptionsDialog::OnSize(wxSizeEvent& event)  
+	{  
+		event.Skip();  
+		if (m_showRedBorder)  
+			Refresh();  
+	}
+#endif
 }

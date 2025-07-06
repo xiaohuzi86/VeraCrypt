@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -51,20 +51,6 @@ namespace VeraCrypt
 					return L"";
 				return Data.substr (pos + 1);
 			}
-		}
-		
-		bool HasTrueCryptExtension () const
-		{
-			wstring sExt = GetExtension ();
-			if ((sExt.size () == 2) 
-				&& (sExt[0] == L't' || sExt[0] == L'T')
-				&& (sExt[1] == L'c' || sExt[1] == L'C')
-				)
-			{
-				return true;
-			}
-			else
-				return false;
 		}
 
 	protected:
@@ -118,17 +104,17 @@ namespace VeraCrypt
 		uint64 GetTotalDataRead () const { return TotalDataRead; }
 		uint64 GetTotalDataWritten () const { return TotalDataWritten; }
 		VolumeType::Enum GetType () const { return Type; }
-		bool GetTrueCryptMode() const { return TrueCryptMode; }
 		int GetPim() const { return Pim;}
 		uint64 GetVolumeCreationTime () const { return Header->GetVolumeCreationTime(); }
 		bool IsHiddenVolumeProtectionTriggered () const { return HiddenVolumeProtectionTriggered; }
 		bool IsInSystemEncryptionScope () const { return SystemEncryption; }
-		void Open (const VolumePath &volumePath, bool preserveTimestamps, shared_ptr <VolumePassword> password, int pim, shared_ptr <Pkcs5Kdf> kdf, bool truecryptMode, shared_ptr <KeyfileList> keyfiles, VolumeProtection::Enum protection = VolumeProtection::None, shared_ptr <VolumePassword> protectionPassword = shared_ptr <VolumePassword> (), int protectionPim = 0, shared_ptr <Pkcs5Kdf> protectionKdf = shared_ptr <Pkcs5Kdf> (),shared_ptr <KeyfileList> protectionKeyfiles = shared_ptr <KeyfileList> (), bool sharedAccessAllowed = false, VolumeType::Enum volumeType = VolumeType::Unknown, bool useBackupHeaders = false, bool partitionInSystemEncryptionScope = false);
-		void Open (shared_ptr <File> volumeFile, shared_ptr <VolumePassword> password, int pim, shared_ptr <Pkcs5Kdf> kdf, bool truecryptMode, shared_ptr <KeyfileList> keyfiles, VolumeProtection::Enum protection = VolumeProtection::None, shared_ptr <VolumePassword> protectionPassword = shared_ptr <VolumePassword> (), int protectionPim = 0, shared_ptr <Pkcs5Kdf> protectionKdf = shared_ptr <Pkcs5Kdf> (), shared_ptr <KeyfileList> protectionKeyfiles = shared_ptr <KeyfileList> (), VolumeType::Enum volumeType = VolumeType::Unknown, bool useBackupHeaders = false, bool partitionInSystemEncryptionScope = false);
+		void Open (const VolumePath &volumePath, bool preserveTimestamps, shared_ptr <VolumePassword> password, int pim, shared_ptr <Pkcs5Kdf> kdf, shared_ptr <KeyfileList> keyfiles, bool emvSupportEnabled, VolumeProtection::Enum protection = VolumeProtection::None, shared_ptr <VolumePassword> protectionPassword = shared_ptr <VolumePassword> (), int protectionPim = 0, shared_ptr <Pkcs5Kdf> protectionKdf = shared_ptr <Pkcs5Kdf> (),shared_ptr <KeyfileList> protectionKeyfiles = shared_ptr <KeyfileList> (), bool sharedAccessAllowed = false, VolumeType::Enum volumeType = VolumeType::Unknown, bool useBackupHeaders = false, bool partitionInSystemEncryptionScope = false);
+		void Open (shared_ptr <File> volumeFile, shared_ptr <VolumePassword> password, int pim, shared_ptr <Pkcs5Kdf> kdf, shared_ptr <KeyfileList> keyfiles, bool emvSupportEnabled, VolumeProtection::Enum protection = VolumeProtection::None, shared_ptr <VolumePassword> protectionPassword = shared_ptr <VolumePassword> (), int protectionPim = 0, shared_ptr <Pkcs5Kdf> protectionKdf = shared_ptr <Pkcs5Kdf> (), shared_ptr <KeyfileList> protectionKeyfiles = shared_ptr <KeyfileList> (), VolumeType::Enum volumeType = VolumeType::Unknown, bool useBackupHeaders = false, bool partitionInSystemEncryptionScope = false);
 		void ReadSectors (const BufferPtr &buffer, uint64 byteOffset);
 		void ReEncryptHeader (bool backupHeader, const ConstBufferPtr &newSalt, const ConstBufferPtr &newHeaderKey, shared_ptr <Pkcs5Kdf> newPkcs5Kdf);
 		void WriteSectors (const ConstBufferPtr &buffer, uint64 byteOffset);
 		bool IsEncryptionNotCompleted () const { return EncryptionNotCompleted; }
+		bool IsMasterKeyVulnerable() const { return Header && Header->IsMasterKeyVulnerable(); }
 
 	protected:
 		void CheckProtectedRange (uint64 writeHostOffset, uint64 writeLength);
@@ -152,7 +138,6 @@ namespace VeraCrypt
 		uint64 TopWriteOffset;
 		uint64 TotalDataRead;
 		uint64 TotalDataWritten;
-		bool TrueCryptMode;
 		int Pim;
 		bool EncryptionNotCompleted;
 

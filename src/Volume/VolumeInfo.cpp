@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -54,8 +54,8 @@ namespace VeraCrypt
 		Type = static_cast <VolumeType::Enum> (sr.DeserializeInt32 ("Type"));
 		VirtualDevice = sr.DeserializeWString ("VirtualDevice");
 		sr.Deserialize ("VolumeCreationTime", VolumeCreationTime);
-		sr.Deserialize ("TrueCryptMode", TrueCryptMode);
 		sr.Deserialize ("Pim", Pim);
+		sr.Deserialize ("MasterKeyVulnerable", MasterKeyVulnerable);
 	}
 
 	bool VolumeInfo::FirstVolumeMountedAfterSecond (shared_ptr <VolumeInfo> first, shared_ptr <VolumeInfo> second)
@@ -95,8 +95,8 @@ namespace VeraCrypt
 		sr.Serialize ("Type", static_cast <uint32> (Type));
 		sr.Serialize ("VirtualDevice", wstring (VirtualDevice));
 		sr.Serialize ("VolumeCreationTime", VolumeCreationTime);
-		sr.Serialize ("TrueCryptMode", TrueCryptMode);
 		sr.Serialize ("Pim", Pim);
+		sr.Serialize ("MasterKeyVulnerable", MasterKeyVulnerable);
 	}
 
 	void VolumeInfo::Set (const Volume &volume)
@@ -120,8 +120,8 @@ namespace VeraCrypt
 		TopWriteOffset = volume.GetTopWriteOffset();
 		TotalDataRead = volume.GetTotalDataRead();
 		TotalDataWritten = volume.GetTotalDataWritten();
-		TrueCryptMode = volume.GetTrueCryptMode();
 		Pim = volume.GetPim ();
+		MasterKeyVulnerable = volume.IsMasterKeyVulnerable();
 	}
 
 	TC_SERIALIZER_FACTORY_ADD_CLASS (VolumeInfo);

@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2013-2018 IDRIX. All rights reserved.
+ Copyright (c) 2013-2025 AM Crypto. All rights reserved.
 
  Governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
@@ -13,6 +13,7 @@
 #include "Main/Main.h"
 #include "Main/Application.h"
 #include <wx/msgqueue.h>
+#include <wx/msgdlg.h>
 
 namespace VeraCrypt
 {
@@ -79,7 +80,7 @@ namespace VeraCrypt
 			m_bThreadRunning = true;
 		}
 
-		int GetCharWidth (wxWindow *window) const
+		static int ComputeCharWidth (wxWindow *window)
 		{
 			int width;
 			int height;
@@ -165,7 +166,7 @@ namespace VeraCrypt
 		void OnAdminPasswordRequest(wxCommandEvent &)
 		{
 
-			wxPasswordEntryDialog dialog (this, _("Enter your user password or administrator password:"), _("Administrator privileges required"));
+			wxPasswordEntryDialog dialog (this, LangString["LINUX_ADMIN_PW_QUERY"], LangString["LINUX_ADMIN_PW_QUERY_TITLE"]);
 			if (dialog.ShowModal() != wxID_OK)
 				m_queue.Post(wxT(""));
 			else
@@ -178,7 +179,7 @@ namespace VeraCrypt
 		{
 
 			wxPasswordEntryDialog dialog (this, wxString::Format (LangString["ENTER_TOKEN_PASSWORD"], e.GetString()), LangString["IDD_TOKEN_PASSWORD"]);
-			dialog.SetSize (wxSize (GetCharWidth (&dialog) * 50, -1));
+			dialog.SetSize (wxSize (ComputeCharWidth (&dialog) * 50, -1));
 
 			if (dialog.ShowModal() != wxID_OK)
 				m_queue.Post(wxT(""));
@@ -196,8 +197,9 @@ namespace VeraCrypt
 
 				pParam->m_style |= wxSTAY_ON_TOP;
 			}
-
-			int iResult = wxMessageBox (pParam->m_message, pParam->m_caption, pParam->m_style, this);
+			wxMessageDialog cur(this, pParam->m_message, pParam->m_caption, pParam->m_style);
+			cur.SetYesNoLabels(LangString["UISTR_YES"], LangString["UISTR_NO"]);
+			int iResult =  (cur.ShowModal() == wxID_YES ? wxYES : wxNO);
 			delete pParam;
 			m_queue.Post(wxString::Format(wxT("%d"), iResult));
 		}

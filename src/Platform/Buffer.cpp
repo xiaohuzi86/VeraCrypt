@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -44,7 +44,7 @@ namespace VeraCrypt
 
 		try
 		{
-			DataPtr = static_cast<byte *> ((alignment > 0)? Memory::AllocateAligned (size, alignment) : Memory::Allocate (size));
+			DataPtr = static_cast<uint8 *> ((alignment > 0)? Memory::AllocateAligned (size, alignment) : Memory::Allocate (size));
 			DataSize = size;
 			DataAlignment = alignment;
 		}
@@ -77,7 +77,7 @@ namespace VeraCrypt
 	void Buffer::Erase ()
 	{
 		if (DataSize > 0)
-			Memory::Erase (DataPtr, DataSize);
+			burn (DataPtr, DataSize);
 	}
 
 	void Buffer::Free ()

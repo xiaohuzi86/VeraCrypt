@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file) 
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -92,11 +92,11 @@ public:
 
 	virtual BOOL STDMETHODCALLTYPE FormatNtfs (int driveNo, int clusterSize)
 	{
-		return ::FormatNtfs (driveNo, clusterSize);
+		return ::FormatNtfs (driveNo, clusterSize, TRUE);
 	}
 
 	virtual int STDMETHODCALLTYPE AnalyzeHiddenVolumeHost (
-		LONG_PTR hwndDlg, int *driveNo, __int64 hiddenVolHostSize, int *realClusterSize, __int64 *nbrFreeClusters)
+		__int64 hwndDlg, int *driveNo, __int64 hiddenVolHostSize, int *realClusterSize, __int64 *nbrFreeClusters)
 	{
 		return ::AnalyzeHiddenVolumeHost (
 			(HWND) hwndDlg, driveNo, hiddenVolHostSize, realClusterSize, nbrFreeClusters);
@@ -134,7 +134,7 @@ public:
 
 	virtual BOOL STDMETHODCALLTYPE FormatFs (int driveNo, int clusterSize, int fsType)
 	{
-		return ::FormatFs (driveNo, clusterSize, fsType);
+		return ::FormatFs (driveNo, clusterSize, fsType, TRUE);
 	}
 
 	virtual DWORD STDMETHODCALLTYPE GetFileSize (BSTR filePath, unsigned __int64 *pSize)
@@ -180,6 +180,16 @@ public:
 	virtual DWORD STDMETHODCALLTYPE UpdateSetupConfigFile (BOOL bForInstall)
 	{
 		return BaseCom::UpdateSetupConfigFile (bForInstall);
+	}
+
+	virtual DWORD STDMETHODCALLTYPE NotifyService (DWORD dwNotifyCode)
+	{
+		return BaseCom::NotifyService (dwNotifyCode);
+	}
+
+	virtual DWORD STDMETHODCALLTYPE FastFileResize (BSTR filePath, __int64 fileSize)
+	{
+		return BaseCom::FastFileResize (filePath, fileSize);
 	}
 
 protected:
@@ -245,12 +255,12 @@ extern "C" int UacFormatNtfs (HWND hWnd, int driveNo, int clusterSize)
 	CComPtr<ITrueCryptFormatCom> tc;
 	int r;
 
-	CoInitialize (NULL);
+	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 
 	if (ComGetInstance (hWnd, &tc))
 		r = tc->FormatNtfs (driveNo, clusterSize);
 	else
-		r = 0;
+		r = (int) GetLastError();
 
 	CoUninitialize ();
 
@@ -262,12 +272,12 @@ extern "C" int UacFormatFs (HWND hWnd, int driveNo, int clusterSize, int fsType)
 	CComPtr<ITrueCryptFormatCom> tc;
 	int r;
 
-	CoInitialize (NULL);
+	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 
 	if (ComGetInstance (hWnd, &tc))
 		r = tc->FormatFs (driveNo, clusterSize, fsType);
 	else
-		r = 0;
+		r = (int) GetLastError();
 
 	CoUninitialize ();
 
@@ -280,12 +290,77 @@ extern "C" int UacAnalyzeHiddenVolumeHost (HWND hwndDlg, int *driveNo, __int64 h
 	CComPtr<ITrueCryptFormatCom> tc;
 	int r;
 
-	CoInitialize (NULL);
+	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 
 	if (ComGetInstance (hwndDlg, &tc))
-		r = tc->AnalyzeHiddenVolumeHost ((LONG_PTR) hwndDlg, driveNo, hiddenVolHostSize, realClusterSize, nbrFreeClusters);
+		r = tc->AnalyzeHiddenVolumeHost ((__int64) hwndDlg, driveNo, hiddenVolHostSize, realClusterSize, nbrFreeClusters);
 	else
 		r = 0;
+
+	CoUninitialize ();
+
+	return r;
+}
+
+extern "C" BOOL UacWriteLocalMachineRegistryDword (HWND hwndDlg, wchar_t *keyPath, wchar_t *valueName, DWORD value)
+{
+	CComPtr<ITrueCryptFormatCom> tc;
+	int r = 0;
+
+	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+
+	if (ComGetInstance (hwndDlg, &tc))
+	{
+		CComBSTR keyPathBstr, valueNameBstr;
+		BSTR bstr = W2BSTR(keyPath);
+		if (bstr)
+		{
+			keyPathBstr.Attach (bstr);
+			bstr = W2BSTR(valueName);
+			if (bstr)
+			{
+				valueNameBstr.Attach (bstr);
+				r = tc->WriteLocalMachineRegistryDwordValue (keyPathBstr, valueNameBstr, value);
+			}
+			else
+				r = ERROR_OUTOFMEMORY;
+		}
+		else
+			r = ERROR_OUTOFMEMORY;
+	}
+
+	CoUninitialize ();
+
+	if (r == ERROR_SUCCESS)
+		return TRUE;
+	else
+	{
+		SetLastError (r);
+		return FALSE;
+	}
+}
+
+extern "C" DWORD UacFastFileCreation (HWND hWnd, wchar_t* filePath, __int64 fileSize)
+{
+	CComPtr<ITrueCryptFormatCom> tc;
+	DWORD r;
+
+	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+
+	if (ComGetInstance (hWnd, &tc))
+	{
+		CComBSTR filePathBstr;
+		BSTR bstr = W2BSTR(filePath);
+		if (bstr)
+		{
+			filePathBstr.Attach (bstr);
+			r = tc->FastFileResize (filePathBstr, fileSize);
+		}
+		else
+			r = ERROR_OUTOFMEMORY;
+	}
+	else
+		r = GetLastError();
 
 	CoUninitialize ();
 

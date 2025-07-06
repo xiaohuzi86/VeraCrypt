@@ -6,7 +6,7 @@
  Encryption for the Masses 2.02a, which is Copyright (c) 1998-2000 Paul Le Roux
  and which is governed by the 'License Agreement for Encryption for the Masses' 
  Modifications and additions to the original source code (contained in this file) 
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages. */
@@ -21,6 +21,12 @@ extern "C" {
 // Volume header version
 #define VOLUME_HEADER_VERSION					0x0005 
 
+// Volume header magic identifiers
+// 32-bit magic number identifying a valid VeraCrypt volume header ("VERA" in ASCII)
+#define TC_HEADER_MAGIC_NUMBER							0x56455241
+// 64-bit magic number identifier for boot drive filter extension ("VERABEXT" in ASCII)
+#define TC_BOOT_DRIVE_FILTER_EXTENSION_MAGIC_NUMBER		0x5645524142455854ULL
+
 // Version number written to volume header during format;
 // specifies the minimum program version required to mount the volume
 #define TC_VOLUME_MIN_REQUIRED_PROGRAM_VERSION	0x010b
@@ -28,6 +34,12 @@ extern "C" {
 // Version number written (encrypted) to the key data area of an encrypted system partition/drive;
 // specifies the minimum program version required to decrypt the system partition/drive
 #define TC_SYSENC_KEYSCOPE_MIN_REQ_PROG_VERSION	0x010b
+
+// Required 16-byte alignment for derived key buffers to ensure optimal performance and compatibility with SIMD instructions.
+#define TC_DERIVED_KEY_BUFFER_ALIGNMENT			16
+
+// Required 16-byte alignment for KEY_INFO buffer to ensure optimal performance and compatibility with SIMD instructions.
+#define TC_KEY_INFO_BUFFER_ALIGNMENT			16
 
 // Current volume format version (created by TrueCrypt 6.0+)
 #define TC_VOLUME_FORMAT_VERSION				2
@@ -129,26 +141,26 @@ extern "C" {
 
 extern BOOL ReadVolumeHeaderRecoveryMode;
 
-uint16 GetHeaderField16 (byte *header, int offset);
-uint32 GetHeaderField32 (byte *header, int offset);
-UINT64_STRUCT GetHeaderField64 (byte *header, int offset);
+uint16 GetHeaderField16 (uint8 *header, int offset);
+uint32 GetHeaderField32 (uint8 *header, int offset);
+UINT64_STRUCT GetHeaderField64 (uint8 *header, int offset);
 #if defined(TC_WINDOWS_BOOT)
-int ReadVolumeHeader (BOOL bBoot, char *encryptedHeader, Password *password, int pim, PCRYPTO_INFO *retInfo, CRYPTO_INFO *retHeaderCryptoInfo);
+int ReadVolumeHeader (BOOL bBoot, unsigned char *encryptedHeader, Password *password, int pim, PCRYPTO_INFO *retInfo, CRYPTO_INFO *retHeaderCryptoInfo);
 #elif defined(_UEFI)
-int ReadVolumeHeader(BOOL bBoot, char *encryptedHeader, Password *password, int pkcs5_prf, int pim, BOOL truecryptMode, PCRYPTO_INFO *retInfo, CRYPTO_INFO *retHeaderCryptoInfo);
-int CreateVolumeHeaderInMemory(BOOL bBoot, char *encryptedHeader, int ea, int mode, Password *password, int pkcs5_prf, int pim, char *masterKeydata, PCRYPTO_INFO *retInfo, unsigned __int64 volumeSize, unsigned __int64 hiddenVolumeSize, unsigned __int64 encryptedAreaStart, unsigned __int64 encryptedAreaLength, uint16 requiredProgramVersion, uint32 headerFlags, uint32 sectorSize, BOOL bWipeMode);
+int ReadVolumeHeader(BOOL bBoot, unsigned char *encryptedHeader, Password *password, int pkcs5_prf, int pim, PCRYPTO_INFO *retInfo, CRYPTO_INFO *retHeaderCryptoInfo);
+int CreateVolumeHeaderInMemory(BOOL bBoot, unsigned char *encryptedHeader, int ea, int mode, Password *password, int pkcs5_prf, int pim, char *masterKeydata, PCRYPTO_INFO *retInfo, unsigned __int64 volumeSize, unsigned __int64 hiddenVolumeSize, unsigned __int64 encryptedAreaStart, unsigned __int64 encryptedAreaLength, uint16 requiredProgramVersion, uint32 headerFlags, uint32 sectorSize, BOOL bWipeMode);
 BOOL RandgetBytes(unsigned char *buf, int len, BOOL forceSlowPoll);
 #else
-int ReadVolumeHeader (BOOL bBoot, char *encryptedHeader, Password *password, int pkcs5_prf, int pim, BOOL truecryptMode, PCRYPTO_INFO *retInfo, CRYPTO_INFO *retHeaderCryptoInfo);
+int ReadVolumeHeader (BOOL bBoot, unsigned char *encryptedHeader, Password *password, int pkcs5_prf, int pim, PCRYPTO_INFO *retInfo, CRYPTO_INFO *retHeaderCryptoInfo);
 #if defined(_WIN32) && !defined(_UEFI)
-void ComputeBootloaderFingerprint (byte *bootLoaderBuf, unsigned int bootLoaderSize, byte* fingerprint);
+void ComputeBootloaderFingerprint (uint8 *bootLoaderBuf, unsigned int bootLoaderSize, uint8* fingerprint);
 #endif
 #endif
 
 #if !defined (DEVICE_DRIVER) && !defined (TC_WINDOWS_BOOT) && !defined(_UEFI)
-int CreateVolumeHeaderInMemory (HWND hwndDlg, BOOL bBoot, char *encryptedHeader, int ea, int mode, Password *password, int pkcs5_prf, int pim, char *masterKeydata, PCRYPTO_INFO *retInfo, unsigned __int64 volumeSize, unsigned __int64 hiddenVolumeSize, unsigned __int64 encryptedAreaStart, unsigned __int64 encryptedAreaLength, uint16 requiredProgramVersion, uint32 headerFlags, uint32 sectorSize, BOOL bWipeMode);
-BOOL ReadEffectiveVolumeHeader (BOOL device, HANDLE fileHandle, byte *header, DWORD *bytesRead);
-BOOL WriteEffectiveVolumeHeader (BOOL device, HANDLE fileHandle, byte *header);
+int CreateVolumeHeaderInMemory (HWND hwndDlg, BOOL bBoot, unsigned char *encryptedHeader, int ea, int mode, Password *password, int pkcs5_prf, int pim, char *masterKeydata, PCRYPTO_INFO *retInfo, unsigned __int64 volumeSize, unsigned __int64 hiddenVolumeSize, unsigned __int64 encryptedAreaStart, unsigned __int64 encryptedAreaLength, uint16 requiredProgramVersion, uint32 headerFlags, uint32 sectorSize, BOOL bWipeMode);
+BOOL ReadEffectiveVolumeHeader (BOOL device, HANDLE fileHandle, uint8 *header, DWORD *bytesRead);
+BOOL WriteEffectiveVolumeHeader (BOOL device, HANDLE fileHandle, uint8 *header);
 int WriteRandomDataToReservedHeaderAreas (HWND hwndDlg, HANDLE dev, CRYPTO_INFO *cryptoInfo, uint64 dataAreaSize, BOOL bPrimaryOnly, BOOL bBackupOnly);
 #endif
 

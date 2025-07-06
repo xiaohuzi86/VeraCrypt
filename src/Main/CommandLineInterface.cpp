@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -29,7 +29,13 @@ namespace VeraCrypt
 		ArgPim (-1),
 		ArgSize (0),
 		ArgVolumeType (VolumeType::Unknown),
-		ArgTrueCryptMode (false),
+		ArgAllowScreencapture (false),
+		ArgDisableFileSizeCheck (false),
+		ArgUseLegacyPassword (false),
+		ArgUseDummySudoPassword (false),
+#if defined(TC_UNIX)
+		ArgAllowInsecureMount (false),
+ #endif
 		StartBackgroundTask (false)
 	{
 		wxCmdLineParser parser;
@@ -37,6 +43,9 @@ namespace VeraCrypt
 
 		parser.SetSwitchChars (L"-");
 
+#if defined(TC_WINDOWS) || defined(TC_MACOSX)
+		parser.AddSwitch (L"",  L"allow-screencapture",	_("Allow window to be included in screenshots and screen captures (Windows/MacOS)"));
+#endif
 		parser.AddOption (L"",  L"auto-mount",			_("Auto mount device-hosted/favorite volumes"));
 		parser.AddSwitch (L"",  L"backup-headers",		_("Backup volume headers"));
 		parser.AddSwitch (L"",  L"background-task",		_("Start Background Task"));
@@ -47,13 +56,14 @@ namespace VeraCrypt
 		parser.AddSwitch (L"c", L"create",				_("Create new volume"));
 		parser.AddSwitch (L"",	L"create-keyfile",		_("Create new keyfile"));
 		parser.AddSwitch (L"",	L"delete-token-keyfiles", _("Delete security token keyfiles"));
-		parser.AddSwitch (L"d", L"dismount",			_("Dismount volume"));
+		parser.AddSwitch (L"d", L"dismount",			_("Unmount volume (deprecated: use 'unmount')"));
+		parser.AddSwitch (L"u", L"unmount",				_("Unmount volume"));
 		parser.AddSwitch (L"",	L"display-password",	_("Display password while typing"));
 		parser.AddOption (L"",	L"encryption",			_("Encryption algorithm"));
 		parser.AddSwitch (L"",	L"explore",				_("Open explorer window for mounted volume"));
-		parser.AddSwitch (L"",	L"export-token-keyfile",_("Export keyfile from security token"));
+		parser.AddSwitch (L"",	L"export-token-keyfile",_("Export keyfile from token"));
 		parser.AddOption (L"",	L"filesystem",			_("Filesystem type"));
-		parser.AddSwitch (L"f", L"force",				_("Force mount/dismount/overwrite"));
+		parser.AddSwitch (L"f", L"force",				_("Force mount/unmount/overwrite"));
 #if !defined(TC_WINDOWS) && !defined(TC_MACOSX)
 		parser.AddOption (L"",	L"fs-options",			_("Filesystem mount options"));
 #endif
@@ -62,7 +72,9 @@ namespace VeraCrypt
 		parser.AddSwitch (L"",	L"import-token-keyfiles", _("Import keyfiles to security token"));
 		parser.AddOption (L"k", L"keyfiles",			_("Keyfiles"));
 		parser.AddSwitch (L"l", L"list",				_("List mounted volumes"));
-		parser.AddSwitch (L"",	L"list-token-keyfiles",	_("List security token keyfiles"));
+		parser.AddSwitch (L"",	L"list-token-keyfiles",	_("List token keyfiles"));
+		parser.AddSwitch (L"",	L"list-securitytoken-keyfiles",	_("List security token keyfiles"));
+		parser.AddSwitch (L"",	L"list-emvtoken-keyfiles",	_("List EMV token keyfiles"));
 		parser.AddSwitch (L"",	L"load-preferences",	_("Load user preferences"));
 		parser.AddSwitch (L"",	L"mount",				_("Mount volume interactively"));
 		parser.AddOption (L"m", L"mount-options",		_("VeraCrypt volume mount options"));
@@ -85,7 +97,6 @@ namespace VeraCrypt
 		parser.AddSwitch (L"",	L"quick",				_("Enable quick format"));
 		parser.AddOption (L"",	L"size",				_("Size in bytes"));
 		parser.AddOption (L"",	L"slot",				_("Volume slot number"));
-		parser.AddSwitch (L"tc",L"truecrypt",			_("Enable TrueCrypt mode. Should be put first to avoid issues."));
 		parser.AddSwitch (L"",	L"test",				_("Test internal algorithms"));
 		parser.AddSwitch (L"t", L"text",				_("Use text user interface"));
 		parser.AddOption (L"",	L"token-lib",			_("Security token library"));
@@ -96,7 +107,14 @@ namespace VeraCrypt
 		parser.AddOption (L"",	L"volume-type",			_("Volume type"));
 		parser.AddParam (								_("Volume path"), wxCMD_LINE_VAL_STRING, wxCMD_LINE_PARAM_OPTIONAL);
 		parser.AddParam (								_("Mount point"), wxCMD_LINE_VAL_STRING, wxCMD_LINE_PARAM_OPTIONAL);
-
+		parser.AddSwitch (L"",	L"no-size-check",		_("Disable check of container size against disk free space."));
+		parser.AddSwitch (L"",	L"legacy-password-maxlength", _("Use legacy maximum password length (64 UTF-8 bytes)"));
+#if defined(TC_LINUX ) || defined (TC_FREEBSD)
+		parser.AddSwitch (L"",	L"use-dummy-sudo-password",	_("Use dummy password in sudo to detect if it is already authenticated"));
+#endif
+#if defined(TC_UNIX)
+		parser.AddSwitch (L"",	L"allow-insecure-mount",	_("Allow mounting volumes on mount points that are in the user's PATH"));
+#endif
 		wxString str;
 		bool param1IsVolume = false;
 		bool param1IsMountedVolumeSpec = false;
@@ -133,6 +151,11 @@ namespace VeraCrypt
 			ArgMountOptions = Preferences.DefaultMountOptions;
 		}
 
+#if defined(TC_WINDOWS) || defined(TC_MACOSX)
+		ArgAllowScreencapture = parser.Found (L"allow-screencapture");
+#else
+		ArgAllowScreencapture = true; // Protection against screenshots is supported only on Windows and MacOS
+#endif
 		// Commands
 		if (parser.Found (L"auto-mount", &str))
 		{
@@ -200,7 +223,7 @@ namespace VeraCrypt
 			ArgCommand = CommandId::DeleteSecurityTokenKeyfiles;
 		}
 
-		if (parser.Found (L"dismount"))
+		if (parser.Found (L"unmount") || parser.Found (L"dismount"))
 		{
 			CheckCommandSingle();
 			ArgCommand = CommandId::DismountVolumes;
@@ -210,13 +233,13 @@ namespace VeraCrypt
 		if (parser.Found (L"export-token-keyfile"))
 		{
 			CheckCommandSingle();
-			ArgCommand = CommandId::ExportSecurityTokenKeyfile;
+			ArgCommand = CommandId::ExportTokenKeyfile;
 		}
 
 		if (parser.Found (L"import-token-keyfiles"))
 		{
 			CheckCommandSingle();
-			ArgCommand = CommandId::ImportSecurityTokenKeyfiles;
+			ArgCommand = CommandId::ImportTokenKeyfiles;
 		}
 
 		if (parser.Found (L"list"))
@@ -229,8 +252,18 @@ namespace VeraCrypt
 		if (parser.Found (L"list-token-keyfiles"))
 		{
 			CheckCommandSingle();
-			ArgCommand = CommandId::ListSecurityTokenKeyfiles;
+			ArgCommand = CommandId::ListTokenKeyfiles;
 		}
+        if (parser.Found (L"list-securitytoken-keyfiles"))
+        {
+            CheckCommandSingle();
+            ArgCommand = CommandId::ListSecurityTokenKeyfiles;
+        }
+        if (parser.Found (L"list-emvtoken-keyfiles"))
+        {
+            CheckCommandSingle();
+            ArgCommand = CommandId::ListEMVTokenKeyfiles;
+        }
 
 		if (parser.Found (L"mount"))
 		{
@@ -309,6 +342,8 @@ namespace VeraCrypt
 					ArgFilesystem = VolumeCreationOptions::FilesystemType::NTFS;
 				else if (str.IsSameAs (L"exFAT", false))
 					ArgFilesystem = VolumeCreationOptions::FilesystemType::exFAT;
+				else if (str.IsSameAs (L"Btrfs", false))
+					ArgFilesystem = VolumeCreationOptions::FilesystemType::Btrfs;
 #elif defined (TC_MACOSX)
 				else if (	str.IsSameAs (L"HFS", false)
 						|| 	str.IsSameAs (L"HFS+", false)
@@ -319,18 +354,40 @@ namespace VeraCrypt
 				}
 				else if (str.IsSameAs (L"exFAT", false))
 					ArgFilesystem = VolumeCreationOptions::FilesystemType::exFAT;
+				else if (str.IsSameAs (L"Btrfs", false))
+					ArgFilesystem = VolumeCreationOptions::FilesystemType::Btrfs;
+				else if (str.IsSameAs (L"APFS", false))
+					ArgFilesystem = VolumeCreationOptions::FilesystemType::APFS;
 #elif defined (TC_FREEBSD) || defined (TC_SOLARIS)
 				else if (str.IsSameAs (L"UFS", false))
 					ArgFilesystem = VolumeCreationOptions::FilesystemType::UFS;
+				else if (str.IsSameAs (L"Ext2", false))
+					ArgFilesystem = VolumeCreationOptions::FilesystemType::Ext2;
+				else if (str.IsSameAs (L"Ext3", false))
+					ArgFilesystem = VolumeCreationOptions::FilesystemType::Ext3;
+				else if (str.IsSameAs (L"Ext4", false))
+					ArgFilesystem = VolumeCreationOptions::FilesystemType::Ext4;
+				else if (str.IsSameAs (L"NTFS", false))
+					ArgFilesystem = VolumeCreationOptions::FilesystemType::NTFS;
+				else if (str.IsSameAs (L"exFAT", false))
+					ArgFilesystem = VolumeCreationOptions::FilesystemType::exFAT;
 #endif
 				else
-					ArgFilesystem = VolumeCreationOptions::FilesystemType::None;
+					throw_err (LangString["UNKNOWN_OPTION"] + L": " + str);
 			}
 		}
 
 		ArgForce = parser.Found (L"force");
 
-		ArgTrueCryptMode = parser.Found (L"truecrypt");
+		ArgDisableFileSizeCheck = parser.Found (L"no-size-check");
+		ArgUseLegacyPassword = parser.Found (L"legacy-password-maxlength");
+#if defined(TC_LINUX ) || defined (TC_FREEBSD)
+		ArgUseDummySudoPassword = parser.Found (L"use-dummy-sudo-password");
+#endif
+
+#if defined(TC_UNIX)
+		ArgAllowInsecureMount = parser.Found (L"allow-insecure-mount");
+#endif
 
 #if !defined(TC_WINDOWS) && !defined(TC_MACOSX)
 		if (parser.Found (L"fs-options", &str))
@@ -402,7 +459,7 @@ namespace VeraCrypt
 			ArgNewKeyfiles = ToKeyfileList (str);
 
 		if (parser.Found (L"new-password", &str))
-			ArgNewPassword = ToUTF8Password (str.c_str());
+			ArgNewPassword = ToUTF8Password (str.c_str(), -1, ArgUseLegacyPassword? VolumePassword::MaxLegacySize : VolumePassword::MaxSize);
 
 		if (parser.Found (L"new-pim", &str))
 		{
@@ -417,8 +474,6 @@ namespace VeraCrypt
 
 			if (ArgNewPim < 0 || ArgNewPim > (ArgMountOptions.PartitionInSystemEncryptionScope? MAX_BOOT_PIM_VALUE: MAX_PIM_VALUE))
 				throw_err (LangString["PARAMETER_INCORRECT"] + L": " + str);
-			else if (ArgNewPim > 0 && ArgTrueCryptMode)
-				throw_err (LangString["PIM_NOT_SUPPORTED_FOR_TRUECRYPT_MODE"]);
 		}
 
 		if (parser.Found (L"non-interactive"))
@@ -441,7 +496,7 @@ namespace VeraCrypt
 		{
 			if (Preferences.UseStandardInput)
 				throw_err (L"--password cannot be used with --stdin");
-			ArgPassword = ToUTF8Password (str.c_str());
+			ArgPassword = ToUTF8Password (str.c_str(), -1, ArgUseLegacyPassword? VolumePassword::MaxLegacySize : VolumePassword::MaxSize);
 		}
 
 		if (parser.Found (L"pim", &str))
@@ -457,8 +512,6 @@ namespace VeraCrypt
 
 			if (ArgPim < 0 || ArgPim > (ArgMountOptions.PartitionInSystemEncryptionScope? MAX_BOOT_PIM_VALUE: MAX_PIM_VALUE))
 				throw_err (LangString["PARAMETER_INCORRECT"] + L": " + str);
-			else if (ArgPim > 0 && ArgTrueCryptMode)
-				throw_err (LangString["PIM_NOT_SUPPORTED_FOR_TRUECRYPT_MODE"]);
 		}
 
 		if (parser.Found (L"protect-hidden", &str))
@@ -482,7 +535,7 @@ namespace VeraCrypt
 
 		if (parser.Found (L"protection-password", &str))
 		{
-			ArgMountOptions.ProtectionPassword = ToUTF8Password (str.c_str());
+			ArgMountOptions.ProtectionPassword = ToUTF8Password (str.c_str(), -1, ArgUseLegacyPassword? VolumePassword::MaxLegacySize : VolumePassword::MaxSize);
 			ArgMountOptions.Protection = VolumeProtection::HiddenVolumeReadOnly;
 		}
 
@@ -513,7 +566,7 @@ namespace VeraCrypt
 				if (hashName.IsSameAs (str, false) || hashAltName.IsSameAs (str, false))
 				{
 					bHashFound = true;
-					ArgMountOptions.ProtectionKdf = Pkcs5Kdf::GetAlgorithm (*hash, ArgTrueCryptMode);
+					ArgMountOptions.ProtectionKdf = Pkcs5Kdf::GetAlgorithm (*hash);
 				}
 			}
 
@@ -554,40 +607,45 @@ namespace VeraCrypt
 
 		if (parser.Found (L"size", &str))
 		{
-			uint64 multiplier;
-			wxChar lastChar = str [str.Length () - 1];
-			if (lastChar >= wxT('0') && lastChar <= wxT('9'))
-				multiplier = 1;
-			else if (lastChar == wxT('K') || lastChar == wxT('k'))
-				multiplier = BYTES_PER_KB;
-			else if (lastChar == wxT('M') || lastChar == wxT('m'))
-				multiplier = BYTES_PER_MB;
-			else if (lastChar == wxT('G') || lastChar == wxT('g'))
-				multiplier = BYTES_PER_GB;
-			else if (lastChar == wxT('T') || lastChar == wxT('t'))
-				multiplier = BYTES_PER_TB;
+			if (str.CmpNoCase (wxT("max")) == 0)
+			{
+				ArgSize = (uint64) -1; // indicator of maximum available size
+			}
 			else
-				throw_err (LangString["PARAMETER_INCORRECT"] + L": " + str);
+			{
+				uint64 multiplier;
+				wxString originalStr = str;
+				size_t index = str.find_first_not_of (wxT("0123456789"));
+				if (index == 0)
+				{
+					throw_err (LangString["PARAMETER_INCORRECT"] + L": " + str);
+				}
+				else if (index != (size_t) wxNOT_FOUND)
+				{
+					wxString sizeSuffix = str.Mid(index);
+					if (sizeSuffix.CmpNoCase(wxT("K")) == 0 || sizeSuffix.CmpNoCase(wxT("KiB")) == 0)
+						multiplier = BYTES_PER_KB;
+					else if (sizeSuffix.CmpNoCase(wxT("M")) == 0 || sizeSuffix.CmpNoCase(wxT("MiB")) == 0)
+						multiplier = BYTES_PER_MB;
+					else if (sizeSuffix.CmpNoCase(wxT("G")) == 0 || sizeSuffix.CmpNoCase(wxT("GiB")) == 0)
+						multiplier = BYTES_PER_GB;
+					else if (sizeSuffix.CmpNoCase(wxT("T")) == 0 || sizeSuffix.CmpNoCase(wxT("TiB")) == 0)
+						multiplier = BYTES_PER_TB;
+					else
+						throw_err (LangString["PARAMETER_INCORRECT"] + L": " + str);
 
-			// remove suffix if present
-			if (multiplier != 1)
-				str.RemoveLast ();
-			// check that we only have digits in the string
-			size_t index = str.find_first_not_of (wxT("0123456789"));
-			if (index != (size_t) wxNOT_FOUND)
-			{
-				// restore last characater for error display
-				if (multiplier != 1)
-					str += lastChar;
-				throw_err (LangString["PARAMETER_INCORRECT"] + L": " + str);
-			}
-			try
-			{
-				ArgSize = multiplier * StringConverter::ToUInt64 (wstring (str));
-			}
-			catch (...)
-			{
-				throw_err (LangString["PARAMETER_INCORRECT"] + L": " + str);
+					str = str.Left (index);
+				}
+				else
+					multiplier = 1;
+				try
+				{
+					ArgSize = multiplier * StringConverter::ToUInt64 (wstring (str));
+				}
+				catch (...)
+				{
+					throw_err (LangString["PARAMETER_INCORRECT"] + L": " + originalStr);
+				}
 			}
 		}
 
@@ -596,7 +654,7 @@ namespace VeraCrypt
 
         if (parser.Found (L"token-pin", &str) && !str.IsEmpty ())
         {
-            ArgTokenPin = ToUTF8Buffer (str.c_str(), str.Len ());
+            ArgTokenPin = ToUTF8Buffer (str.c_str(), str.Len (), ArgUseLegacyPassword? VolumePassword::MaxLegacySize : VolumePassword::MaxSize);
         }
 
 		if (parser.Found (L"verbose"))
@@ -771,18 +829,18 @@ namespace VeraCrypt
 		return filteredVolumes;
 	}
 
-	shared_ptr<VolumePassword> ToUTF8Password (const wchar_t* str, size_t charCount)
+	shared_ptr<VolumePassword> ToUTF8Password (const wchar_t* str, size_t charCount, size_t maxUtf8Len)
 	{
 		if (charCount > 0)
 		{
-			shared_ptr<SecureBuffer> utf8Buffer = ToUTF8Buffer (str, charCount);
+			shared_ptr<SecureBuffer> utf8Buffer = ToUTF8Buffer (str, charCount, maxUtf8Len);
 			return shared_ptr<VolumePassword>(new VolumePassword (*utf8Buffer));
 		}
 		else
 			return shared_ptr<VolumePassword>(new VolumePassword ());
 	}
 
-	shared_ptr<SecureBuffer> ToUTF8Buffer (const wchar_t* str, size_t charCount)
+	shared_ptr<SecureBuffer> ToUTF8Buffer (const wchar_t* str, size_t charCount, size_t maxUtf8Len)
 	{
 		if (charCount == (size_t) -1)
 			charCount = wcslen (str);
@@ -794,18 +852,23 @@ namespace VeraCrypt
 			if (wxCONV_FAILED == ulen)
 				throw PasswordUTF8Invalid (SRC_POS);
 			SecureBuffer passwordBuf(ulen);
-			ulen = utf8.FromWChar ((char*) (byte*) passwordBuf, ulen, str, charCount);
+			ulen = utf8.FromWChar ((char*) (uint8*) passwordBuf, ulen, str, charCount);
 			if (wxCONV_FAILED == ulen)
 				throw PasswordUTF8Invalid (SRC_POS);
-			if (ulen > VolumePassword::MaxSize)
-				throw PasswordUTF8TooLong (SRC_POS);
+			if (ulen > maxUtf8Len)
+			{
+				if (maxUtf8Len == VolumePassword::MaxLegacySize)
+					throw PasswordLegacyUTF8TooLong (SRC_POS);
+				else
+					throw PasswordUTF8TooLong (SRC_POS);
+			}
 
-			ConstBufferPtr utf8Buffer ((byte*) passwordBuf, ulen);
+			ConstBufferPtr utf8Buffer ((uint8*) passwordBuf, ulen);
 			return shared_ptr<SecureBuffer>(new SecureBuffer (utf8Buffer));
 		}
 		else
 			return shared_ptr<SecureBuffer>(new SecureBuffer ());
 	}
 
-	auto_ptr <CommandLineInterface> CmdLine;
+	unique_ptr <CommandLineInterface> CmdLine;
 }

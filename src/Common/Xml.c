@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -12,6 +12,7 @@
 #if !defined(_UEFI)
 #include <windows.h>
 #include <stdio.h>
+#include <strsafe.h>
 #else
 #include "Tcdefs.h"
 #pragma warning( disable : 4706 )  //  assignment within conditional expression
@@ -185,26 +186,30 @@ char *XmlQuoteText (const char *textSrc, char *textDst, int textDstMaxSize)
 		case '&':
 			if (textDst + 6 > textDstLast)
 				return NULL;
-			strcpy (textDst, "&amp;");
+			StringCchCopyA (textDst, textDstMaxSize, "&amp;");
 			textDst += 5;
+			textDstMaxSize -= 5;
 			continue;
 
 		case '>':
 			if (textDst + 5 > textDstLast)
 				return NULL;
-			strcpy (textDst, "&gt;");
+			StringCchCopyA (textDst, textDstMaxSize, "&gt;");
 			textDst += 4;
+			textDstMaxSize -= 4;
 			continue;
 
 		case '<':
 			if (textDst + 5 > textDstLast)
 				return NULL;
-			strcpy (textDst, "&lt;");
+			StringCchCopyA (textDst, textDstMaxSize, "&lt;");
 			textDst += 4;
+			textDstMaxSize -= 4;
 			continue;
 
 		default:
 			*textDst++ = c;
+			textDstMaxSize--;
 		}
 	}
 
@@ -230,26 +235,30 @@ wchar_t *XmlQuoteTextW (const wchar_t *textSrc, wchar_t *textDst, int textDstMax
 		case L'&':
 			if (textDst + 6 > textDstLast)
 				return NULL;
-			wcscpy (textDst, L"&amp;");
+			StringCchCopyW (textDst, textDstMaxSize, L"&amp;");
 			textDst += 5;
+			textDstMaxSize -= 5;
 			continue;
 
 		case L'>':
 			if (textDst + 5 > textDstLast)
 				return NULL;
-			wcscpy (textDst, L"&gt;");
+			StringCchCopyW (textDst, textDstMaxSize, L"&gt;");
 			textDst += 4;
+			textDstMaxSize -= 4;
 			continue;
 
 		case L'<':
 			if (textDst + 5 > textDstLast)
 				return NULL;
-			wcscpy (textDst, L"&lt;");
+			StringCchCopyW (textDst, textDstMaxSize, L"&lt;");
 			textDst += 4;
+			textDstMaxSize -= 4;
 			continue;
 
 		default:
 			*textDst++ = c;
+			textDstMaxSize--;
 		}
 	}
 

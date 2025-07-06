@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -18,9 +18,10 @@
 
 namespace VeraCrypt
 {
-	VolumePasswordPanel::VolumePasswordPanel (wxWindow* parent, MountOptions* options, shared_ptr <VolumePassword> password, bool disableTruecryptMode, shared_ptr <KeyfileList> keyfiles, bool enableCache, bool enablePassword, bool enableKeyfiles, bool enableConfirmation, bool enablePkcs5Prf, bool isMountPassword, const wxString &passwordLabel)
-		: VolumePasswordPanelBase (parent), Keyfiles (new KeyfileList), EnablePimEntry (true)
+	VolumePasswordPanel::VolumePasswordPanel (wxWindow* parent, MountOptions* options, shared_ptr <VolumePassword> password, shared_ptr <KeyfileList> keyfiles, bool enableCache, bool enablePassword, bool enableKeyfiles, bool enableConfirmation, bool enablePkcs5Prf, bool isMountPassword, const wxString &passwordLabel)
+		: VolumePasswordPanelBase (parent), TopOwnerParent(NULL), Keyfiles (new KeyfileList), EnablePimEntry (true)
 	{
+		size_t maxPasswordLength = CmdLine->ArgUseLegacyPassword? VolumePassword::MaxLegacySize : VolumePassword::MaxSize;
 		if (keyfiles)
 		{
 			*Keyfiles = *keyfiles;
@@ -32,8 +33,8 @@ namespace VeraCrypt
 			UseKeyfilesCheckBox->SetValue (Gui->GetPreferences().UseKeyfiles && !Keyfiles->empty());
 		}
 
-		PasswordTextCtrl->SetMaxLength (VolumePassword::MaxSize);
-		ConfirmPasswordTextCtrl->SetMaxLength (VolumePassword::MaxSize);
+		PasswordTextCtrl->SetMaxLength (maxPasswordLength);
+		ConfirmPasswordTextCtrl->SetMaxLength (maxPasswordLength);
 
 		if (!passwordLabel.empty())
 		{
@@ -77,21 +78,8 @@ namespace VeraCrypt
 
 		Pkcs5PrfStaticText->Show (enablePkcs5Prf);
 		Pkcs5PrfChoice->Show (enablePkcs5Prf);
-		TrueCryptModeCheckBox->Show (!disableTruecryptMode);
 		HeaderWipeCountText->Show (enablePkcs5Prf && !isMountPassword);
 		HeaderWipeCount->Show (enablePkcs5Prf && !isMountPassword);
-
-		if (options && !disableTruecryptMode)
-		{
-			TrueCryptModeCheckBox->SetValue (options->TrueCryptMode);
-			if (options->TrueCryptMode)
-			{
-				PimCheckBox->Enable (false);
-				VolumePimStaticText->Enable (false);
-				VolumePimTextCtrl->Enable (false);
-				VolumePimHelpStaticText->Enable (false);
-			}
-		}
 
 		if (EnablePimEntry && options && options->Pim > 0)
 		{
@@ -112,7 +100,7 @@ namespace VeraCrypt
 				Pkcs5PrfChoice->Delete (0);
 				Pkcs5PrfChoice->Append (LangString["AUTODETECTION"]);
 			}
-			foreach_ref (const Pkcs5Kdf &kdf, Pkcs5Kdf::GetAvailableAlgorithms(false))
+			foreach_ref (const Pkcs5Kdf &kdf, Pkcs5Kdf::GetAvailableAlgorithms())
 			{
 				if (!kdf.IsDeprecated() || isMountPassword)
 				{
@@ -159,10 +147,8 @@ namespace VeraCrypt
 		if (enableKeyfiles)
 		{
 			SetDropTarget (new FileDropTarget (this));
-#ifdef TC_MACOSX
 			foreach (wxWindow *c, GetChildren())
 				c->SetDropTarget (new FileDropTarget (this));
-#endif
 		}
 
 		Layout();
@@ -186,9 +172,7 @@ namespace VeraCrypt
 
 	void VolumePasswordPanel::SetPimValidator ()
 	{
-		wxTextValidator validator (wxFILTER_INCLUDE_CHAR_LIST);  // wxFILTER_NUMERIC does not exclude - . , etc.
-		const wxChar *valArr[] = { L"0", L"1", L"2", L"3", L"4", L"5", L"6", L"7", L"8", L"9" };
-		validator.SetIncludes (wxArrayString (array_capacity (valArr), (const wxChar **) &valArr));
+		wxTextValidator validator (wxFILTER_DIGITS);
 		VolumePimTextCtrl->SetValidator (validator);
 	}
 
@@ -197,14 +181,15 @@ namespace VeraCrypt
 		FreezeScope freeze (this);
 		bool isPim = (*textCtrl == VolumePimTextCtrl);
 		int colspan = isPim? 1 : 2;
+		size_t maxPasswordLength = CmdLine->ArgUseLegacyPassword? VolumePassword::MaxLegacySize : VolumePassword::MaxSize;
 
 		wxTextCtrl *newTextCtrl = new wxTextCtrl (this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, display ? 0 : wxTE_PASSWORD);
-		newTextCtrl->SetMaxLength (isPim? MAX_PIM_DIGITS : VolumePassword::MaxSize);
+		newTextCtrl->SetMaxLength (isPim? MAX_PIM_DIGITS : maxPasswordLength);
 		newTextCtrl->SetValue ((*textCtrl)->GetValue());
 		newTextCtrl->SetMinSize ((*textCtrl)->GetSize());
 
 		GridBagSizer->Detach ((*textCtrl));
-		GridBagSizer->Add (newTextCtrl, wxGBPosition (row, 1), wxGBSpan (1, colspan), wxEXPAND|wxBOTTOM|wxALIGN_CENTER_VERTICAL, 5);
+		GridBagSizer->Add (newTextCtrl, wxGBPosition (row, 1), wxGBSpan (1, colspan), wxEXPAND|wxBOTTOM, 5);
 		(*textCtrl)->Show (false);
 		WipeTextCtrl (*textCtrl);
 
@@ -219,40 +204,35 @@ namespace VeraCrypt
 			SetPimValidator ();
 	}
 
-	shared_ptr <VolumePassword> VolumePasswordPanel::GetPassword () const
+	shared_ptr <VolumePassword> VolumePasswordPanel::GetPassword (bool bForceLegacyPassword) const
 	{
-		return GetPassword (PasswordTextCtrl);
+		return GetPassword (PasswordTextCtrl, bForceLegacyPassword);
 	}
 
-	shared_ptr <VolumePassword> VolumePasswordPanel::GetPassword (wxTextCtrl *textCtrl) const
+	shared_ptr <VolumePassword> VolumePasswordPanel::GetPassword (wxTextCtrl *textCtrl, bool bLegacyPassword) const
 	{
 		shared_ptr <VolumePassword> password;
 		wchar_t passwordBuf[VolumePassword::MaxSize + 1];
-		finally_do_arg (BufferPtr, BufferPtr (reinterpret_cast <byte *> (passwordBuf), sizeof (passwordBuf)), { finally_arg.Erase(); });
+		size_t maxPasswordLength = (bLegacyPassword || CmdLine->ArgUseLegacyPassword)? VolumePassword::MaxLegacySize: VolumePassword::MaxSize;
+		finally_do_arg (BufferPtr, BufferPtr (reinterpret_cast <uint8 *> (passwordBuf), sizeof (passwordBuf)), { finally_arg.Erase(); });
 
 #ifdef TC_WINDOWS
 		int len = GetWindowText (static_cast <HWND> (textCtrl->GetHandle()), passwordBuf, VolumePassword::MaxSize + 1);
-		password = ToUTF8Password (passwordBuf, len);
+		password = ToUTF8Password (passwordBuf, len, maxPasswordLength);
 #else
 		wxString passwordStr (textCtrl->GetValue());	// A copy of the password is created here by wxWidgets, which cannot be erased
-		for (size_t i = 0; i < passwordStr.size() && i < VolumePassword::MaxSize; ++i)
+		for (size_t i = 0; i < passwordStr.size() && i < maxPasswordLength; ++i)
 		{
 			passwordBuf[i] = (wchar_t) passwordStr[i];
 			passwordStr[i] = L'X';
 		}
-		password = ToUTF8Password (passwordBuf, passwordStr.size() <= VolumePassword::MaxSize ? passwordStr.size() : VolumePassword::MaxSize);
+		password = ToUTF8Password (passwordBuf, passwordStr.size() <= maxPasswordLength ? passwordStr.size() : maxPasswordLength, maxPasswordLength);
 #endif
 		return password;
 	}
 
-	shared_ptr <Pkcs5Kdf> VolumePasswordPanel::GetPkcs5Kdf (bool &bUnsupportedKdf) const
+	shared_ptr <Pkcs5Kdf> VolumePasswordPanel::GetPkcs5Kdf () const
 	{
-		return GetPkcs5Kdf (GetTrueCryptMode(), bUnsupportedKdf);
-	}
-
-	shared_ptr <Pkcs5Kdf> VolumePasswordPanel::GetPkcs5Kdf (bool bTrueCryptMode, bool &bUnsupportedKdf) const
-	{
-		bUnsupportedKdf = false;
 		try
 		{
 			int index = Pkcs5PrfChoice->GetSelection ();
@@ -262,11 +242,10 @@ namespace VeraCrypt
 				return shared_ptr <Pkcs5Kdf> ();
 			}
 			else
-				return Pkcs5Kdf::GetAlgorithm (wstring (Pkcs5PrfChoice->GetStringSelection()), bTrueCryptMode);
+				return Pkcs5Kdf::GetAlgorithm (wstring (Pkcs5PrfChoice->GetStringSelection()));
 		}
 		catch (ParameterIncorrect&)
 		{
-			bUnsupportedKdf = true;
 			return shared_ptr <Pkcs5Kdf> ();
 		}
 	}
@@ -300,21 +279,6 @@ namespace VeraCrypt
 		{
 			VolumePimTextCtrl->SetValue (wxT(""));
 		}
-	}
-
-	bool VolumePasswordPanel::GetTrueCryptMode () const
-	{
-		return TrueCryptModeCheckBox->GetValue ();
-	}
-	
-	void VolumePasswordPanel::SetTrueCryptMode (bool trueCryptMode)
-	{
-		bool bEnablePIM = !trueCryptMode;
-		TrueCryptModeCheckBox->SetValue (trueCryptMode);
-		PimCheckBox->Enable (bEnablePIM);
-		VolumePimStaticText->Enable (bEnablePIM);
-		VolumePimTextCtrl->Enable (bEnablePIM);
-		VolumePimHelpStaticText->Enable (bEnablePIM);
 	}
 
 	int VolumePasswordPanel::GetHeaderWipeCount () const
@@ -382,7 +346,7 @@ namespace VeraCrypt
 			SecurityTokenKeyfilesDialog dialog (this);
 			if (dialog.ShowModal() == wxID_OK)
 			{
-				foreach (const SecurityTokenKeyfilePath &path, dialog.GetSelectedSecurityTokenKeyfilePaths())
+				foreach (const TokenKeyfilePath &path, dialog.GetSelectedSecurityTokenKeyfilePaths())
 				{
 					Keyfiles->push_back (make_shared <Keyfile> (wstring (path)));
 				}
@@ -458,7 +422,11 @@ namespace VeraCrypt
 
 	void VolumePasswordPanel::WipeTextCtrl (wxTextCtrl *textCtrl)
 	{
-		textCtrl->SetValue (wxString (L'X', textCtrl->GetLineLength(0)));
+		int txtLen = textCtrl->GetLineLength(0);
+		if (txtLen > 0)
+		{
+			textCtrl->SetValue (wxString (L'X', txtLen));
+		}
 		GetPassword (textCtrl);
 	}
 
@@ -471,9 +439,9 @@ namespace VeraCrypt
 			VolumePimHelpStaticText->SetLabel(LangString["PIM_CHANGE_WARNING"]);
 			guiUpdated = true;
 		}
-		if (!pimChanged && VolumePimHelpStaticText->GetForegroundColour() != *wxBLACK)
+		if (!pimChanged && VolumePimHelpStaticText->GetForegroundColour() != wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT))
 		{
-			VolumePimHelpStaticText->SetForegroundColour(*wxBLACK);
+			VolumePimHelpStaticText->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT));
 			VolumePimHelpStaticText->SetLabel(LangString["IDC_PIM_HELP"]);
 			guiUpdated = true;
 		}
@@ -492,10 +460,12 @@ namespace VeraCrypt
 	{
 		if (EnablePimEntry)
 		{
+			wxWindow* layoutParent = TopOwnerParent? TopOwnerParent : GetParent();
 			PimCheckBox->Show (false);
 			VolumePimStaticText->Show (true);
 			VolumePimTextCtrl->Show (true);
 			VolumePimHelpStaticText->Show (true);
+			VolumePimTextCtrl->SetFocus();
 
 			if (DisplayPasswordCheckBox->IsChecked ())
 				DisplayPassword (true, &VolumePimTextCtrl, 3);
@@ -505,17 +475,8 @@ namespace VeraCrypt
 				Fit();
 			}
 
-			GetParent()->Layout();
-			GetParent()->Fit();
+			layoutParent->Layout();
+			layoutParent->Fit();
 		}
-	}
-
-	void VolumePasswordPanel::OnTrueCryptModeChecked( wxCommandEvent& event )
-	{
-		bool bEnablePIM = !GetTrueCryptMode ();
-		PimCheckBox->Enable (bEnablePIM);
-		VolumePimStaticText->Enable (bEnablePIM);
-		VolumePimTextCtrl->Enable (bEnablePIM);
-		VolumePimHelpStaticText->Enable (bEnablePIM);
 	}
 }

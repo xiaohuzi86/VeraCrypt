@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2013-2017 IDRIX. All rights reserved.
+ Copyright (c) 2013-2025 AM Crypto. All rights reserved.
 
  Governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
@@ -8,7 +8,11 @@
 
 #include "System.h"
 #include "Volume/EncryptionModeXTS.h"
+#ifdef WOLFCRYPT_BACKEND
+#include "Volume/EncryptionModeWolfCryptXTS.h"
+#endif
 #include "Main/GraphicUserInterface.h"
+#include "Common/PCSCException.h"
 #include "Common/SecurityToken.h"
 #include "WaitDialog.h"
 
@@ -38,12 +42,14 @@ namespace VeraCrypt
 		VC_CONVERT_EXCEPTION (PasswordEmpty);
 		VC_CONVERT_EXCEPTION (PasswordTooLong);
 		VC_CONVERT_EXCEPTION (PasswordUTF8TooLong);
+		VC_CONVERT_EXCEPTION (PasswordLegacyUTF8TooLong);
 		VC_CONVERT_EXCEPTION (PasswordUTF8Invalid);
 		VC_CONVERT_EXCEPTION (UnportablePassword);
 		VC_CONVERT_EXCEPTION (ElevationFailed);
 		VC_CONVERT_EXCEPTION (RootDeviceUnavailable);
 		VC_CONVERT_EXCEPTION (DriveLetterUnavailable);
 		VC_CONVERT_EXCEPTION (DriverError);
+		VC_CONVERT_EXCEPTION (DeviceSectorSizeMismatch);
 		VC_CONVERT_EXCEPTION (EncryptedSystemRequired);
 		VC_CONVERT_EXCEPTION (HigherFuseVersionRequired);
 		VC_CONVERT_EXCEPTION (KernelCryptoServiceTestFailed);
@@ -72,6 +78,7 @@ namespace VeraCrypt
 		VC_CONVERT_EXCEPTION (ParameterTooLarge);
 		VC_CONVERT_EXCEPTION (PartitionDeviceRequired);
 		VC_CONVERT_EXCEPTION (StringConversionFailed);
+		VC_CONVERT_EXCEPTION (TerminalNotFound);
 		VC_CONVERT_EXCEPTION (TestFailed);
 		VC_CONVERT_EXCEPTION (TimeOut);
 		VC_CONVERT_EXCEPTION (UnknownException);
@@ -92,12 +99,27 @@ namespace VeraCrypt
 		VC_CONVERT_EXCEPTION (SecurityTokenLibraryNotInitialized);
 		VC_CONVERT_EXCEPTION (SecurityTokenKeyfileAlreadyExists);
 		VC_CONVERT_EXCEPTION (SecurityTokenKeyfileNotFound);
-		VC_CONVERT_EXCEPTION (UnsupportedAlgoInTrueCryptMode);
-		VC_CONVERT_EXCEPTION (UnsupportedTrueCryptFormat);
 		VC_CONVERT_EXCEPTION (SystemException);
 		VC_CONVERT_EXCEPTION (CipherException);
 		VC_CONVERT_EXCEPTION (VolumeException);
 		VC_CONVERT_EXCEPTION (PasswordException);
+
+		VC_CONVERT_EXCEPTION (PCSCException);
+		VC_CONVERT_EXCEPTION (CommandAPDUNotValid);
+		VC_CONVERT_EXCEPTION (ExtendedAPDUNotSupported);
+		VC_CONVERT_EXCEPTION (ScardLibraryInitializationFailed);
+		VC_CONVERT_EXCEPTION (EMVUnknownCardType);
+		VC_CONVERT_EXCEPTION (EMVSelectAIDFailed);
+		VC_CONVERT_EXCEPTION (EMVIccCertNotFound);
+		VC_CONVERT_EXCEPTION (EMVIssuerCertNotFound);
+		VC_CONVERT_EXCEPTION (EMVCPLCNotFound);
+		VC_CONVERT_EXCEPTION (InvalidEMVPath);
+		VC_CONVERT_EXCEPTION (EMVKeyfileDataNotFound);
+		VC_CONVERT_EXCEPTION (EMVPANNotFound);
+
+		VC_CONVERT_EXCEPTION (MountPointBlocked);
+		VC_CONVERT_EXCEPTION (MountPointNotAllowed);
+
 		throw *ex;
 	}
 }

@@ -4,13 +4,18 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
 */
 
+#ifdef TC_OPENBSD
+#define FUSE_USE_VERSION  26
+#else
 #define FUSE_USE_VERSION  25
+#endif
+
 #include <errno.h>
 #include <fcntl.h>
 #include <fuse.h>
@@ -51,7 +56,11 @@ namespace VeraCrypt
 		return 0;
 	}
 
+#ifdef TC_OPENBSD
+	static void *fuse_service_init (struct fuse_conn_info *)
+#else
 	static void *fuse_service_init ()
+#endif
 	{
 		try
 		{
@@ -214,14 +223,14 @@ namespace VeraCrypt
 						SecureBuffer alignedBuffer (alignedSize);
 
 						FuseService::ReadVolumeSectors (alignedBuffer, alignedOffset);
-						BufferPtr ((byte *) buf, size).CopyFrom (alignedBuffer.GetRange (offset % sectorSize, size));
+						BufferPtr ((uint8 *) buf, size).CopyFrom (alignedBuffer.GetRange (offset % sectorSize, size));
 					}
 					else
 					{
-						FuseService::ReadVolumeSectors (BufferPtr ((byte *) buf, size), offset);
+						FuseService::ReadVolumeSectors (BufferPtr ((uint8 *) buf, size), offset);
 					}
 				}
-				catch (MissingVolumeData)
+				catch (MissingVolumeData&)
 				{
 					return 0;
 				}
@@ -232,7 +241,7 @@ namespace VeraCrypt
 			if (strcmp (path, FuseService::GetControlPath()) == 0)
 			{
 				shared_ptr <Buffer> infoBuf = FuseService::GetVolumeInfo();
-				BufferPtr outBuf ((byte *)buf, size);
+				BufferPtr outBuf ((uint8 *)buf, size);
 
 				if (offset >= (off_t) infoBuf->Size())
 					return 0;
@@ -284,7 +293,7 @@ namespace VeraCrypt
 
 			if (strcmp (path, FuseService::GetVolumeImagePath()) == 0)
 			{
-				FuseService::WriteVolumeSectors (BufferPtr ((byte *) buf, size), offset);
+				FuseService::WriteVolumeSectors (BufferPtr ((uint8 *) buf, size), offset);
 				return size;
 			}
 
@@ -293,7 +302,7 @@ namespace VeraCrypt
 				if (FuseService::AuxDeviceInfoReceived())
 					return -EACCES;
 
-				FuseService::ReceiveAuxDeviceInfo (ConstBufferPtr ((const byte *)buf, size));
+				FuseService::ReceiveAuxDeviceInfo (ConstBufferPtr ((const uint8 *)buf, size));
 				return size;
 			}
 		}
@@ -350,7 +359,7 @@ namespace VeraCrypt
 		{
 			throw;
 		}
-		catch (std::bad_alloc)
+		catch (std::bad_alloc&)
 		{
 			return -ENOMEM;
 		}
@@ -575,7 +584,7 @@ namespace VeraCrypt
 			sigaction (SIGTERM, &action, nullptr);
 
 			// Wait for the exit of the main service
-			byte buf[1];
+			uint8 buf[1];
 			if (read (SignalHandlerPipe->GetReadFD(), buf, sizeof (buf))) { } // Errors ignored
 
 			_exit (0);
@@ -583,7 +592,11 @@ namespace VeraCrypt
 
 		SignalHandlerPipe->GetWriteFD();
 
+#ifdef TC_OPENBSD
+		_exit (fuse_main (argc, argv, &fuse_service_oper, NULL));
+#else
 		_exit (fuse_main (argc, argv, &fuse_service_oper));
+#endif
 	}
 
 	VolumeInfo FuseService::OpenVolumeInfo;
@@ -592,5 +605,5 @@ namespace VeraCrypt
 	VolumeSlotNumber FuseService::SlotNumber;
 	uid_t FuseService::UserId;
 	gid_t FuseService::GroupId;
-	auto_ptr <Pipe> FuseService::SignalHandlerPipe;
+	unique_ptr <Pipe> FuseService::SignalHandlerPipe;
 }

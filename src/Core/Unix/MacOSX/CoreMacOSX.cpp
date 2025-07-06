@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -47,7 +47,7 @@ namespace VeraCrypt
 
 			try
 			{
-				Process::Execute ("hdiutil", args);
+				Process::Execute ("/usr/bin/hdiutil", args);
 			}
 			catch (ExecutedProcessFailed &e)
 			{
@@ -84,7 +84,7 @@ namespace VeraCrypt
 		{
 			try
 			{
-				Process::Execute ("umount", args);
+				Process::Execute ("/sbin/umount", args);
 				break;
 			}
 			catch (ExecutedProcessFailed&)
@@ -107,12 +107,19 @@ namespace VeraCrypt
 	void CoreMacOSX::CheckFilesystem (shared_ptr <VolumeInfo> mountedVolume, bool repair) const
 	{
 		list <string> args;
-		args.push_back ("/Applications/Utilities/Disk Utility.app");
-		Process::Execute ("open", args);
+		struct stat sb;
+
+		if (stat("/Applications/Utilities/Disk Utility.app", &sb) == 0)
+			args.push_back ("/Applications/Utilities/Disk Utility.app");
+		else
+			args.push_back ("/System/Applications/Utilities/Disk Utility.app");
+
+		Process::Execute ("/usr/bin/open", args);
 	}
 
 	void CoreMacOSX::MountAuxVolumeImage (const DirectoryPath &auxMountPoint, const MountOptions &options) const
 	{
+#ifndef VC_MACOSX_FUSET
 		// Check FUSE version
 		char fuseVersionString[MAXHOSTNAMELEN + 1] = { 0 };
 		size_t fuseVersionStringLength = MAXHOSTNAMELEN;
@@ -123,13 +130,17 @@ namespace VeraCrypt
 			fuseVersionStringLength = MAXHOSTNAMELEN;
 			if ((status = sysctlbyname ("vfs.generic.osxfuse.version.number", fuseVersionString, &fuseVersionStringLength, NULL, 0)) != 0)
 			{
-				throw HigherFuseVersionRequired (SRC_POS);
+				fuseVersionStringLength = MAXHOSTNAMELEN;
+				if ((status = sysctlbyname ("vfs.generic.macfuse.version.number", fuseVersionString, &fuseVersionStringLength, NULL, 0)) != 0)
+				{
+					throw HigherFuseVersionRequired (SRC_POS);
+				}
 			}
 		}
 
 		// look for OSXFuse dynamic library
 		struct stat sb;
-		if (0 != stat("/usr/local/lib/libosxfuse_i64.2.dylib", &sb))
+		if (0 != stat("/usr/local/lib/libosxfuse_i64.2.dylib", &sb) && 0 != stat("/usr/local/lib/libfuse.dylib", &sb))
 		{
 			throw HigherFuseVersionRequired (SRC_POS);
 		}
@@ -143,7 +154,7 @@ namespace VeraCrypt
 
 		if (fuseVersionMajor < 2 || (fuseVersionMajor == 2 && fuseVersionMinor < 5))
 			throw HigherFuseVersionRequired (SRC_POS);
-
+#endif
 		// Mount volume image
 		string volImage = string (auxMountPoint) + FuseService::GetVolumeImagePath();
 
@@ -179,7 +190,7 @@ namespace VeraCrypt
 		{
 			try
 			{
-				xml = Process::Execute ("hdiutil", args);
+				xml = Process::Execute ("/usr/bin/hdiutil", args);
 				break;
 			}
 			catch (ExecutedProcessFailed &e)
@@ -222,13 +233,13 @@ namespace VeraCrypt
 				args.push_back (volImage);
 				args.push_back ("-force");
 
-				Process::Execute ("hdiutil", args);
+				Process::Execute ("/usr/bin/hdiutil", args);
 			}
 			catch (ExecutedProcessFailed&) { }
 			throw;
 		}
 	}
 
-	auto_ptr <CoreBase> Core (new CoreServiceProxy <CoreMacOSX>);
-	auto_ptr <CoreBase> CoreDirect (new CoreMacOSX);
+	unique_ptr <CoreBase> Core (new CoreServiceProxy <CoreMacOSX>);
+	unique_ptr <CoreBase> CoreDirect (new CoreMacOSX);
 }

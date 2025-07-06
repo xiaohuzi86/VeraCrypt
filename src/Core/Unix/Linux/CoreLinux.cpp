@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -22,6 +22,9 @@
 #include "Platform/SystemInfo.h"
 #include "Platform/TextReader.h"
 #include "Volume/EncryptionModeXTS.h"
+#ifdef WOLFCRYPT_BACKEND
+#include "Volume/EncryptionModeWolfCryptXTS.h"
+#endif
 #include "Driver/Fuse/FuseService.h"
 #include "Core/Unix/CoreServiceProxy.h"
 
@@ -302,9 +305,13 @@ namespace VeraCrypt
 
 	void CoreLinux::MountVolumeNative (shared_ptr <Volume> volume, MountOptions &options, const DirectoryPath &auxMountPoint) const
 	{
-		bool xts = (typeid (*volume->GetEncryptionMode()) == typeid (EncryptionModeXTS));
-		bool algoNotSupported = (typeid (*volume->GetEncryptionAlgorithm()) == typeid (GOST89))
-			|| (typeid (*volume->GetEncryptionAlgorithm()) == typeid (Kuznyechik))
+		bool xts = (typeid (*volume->GetEncryptionMode()) == 
+            #ifdef WOLFCRYPT_BACKEND
+                        typeid (EncryptionModeWolfCryptXTS));
+            #else
+                        typeid (EncryptionModeXTS));
+            #endif 
+                bool algoNotSupported = (typeid (*volume->GetEncryptionAlgorithm()) == typeid (Kuznyechik))
 			|| (typeid (*volume->GetEncryptionAlgorithm()) == typeid (CamelliaKuznyechik))
 			|| (typeid (*volume->GetEncryptionAlgorithm()) == typeid (KuznyechikTwofish))
 			|| (typeid (*volume->GetEncryptionAlgorithm()) == typeid (KuznyechikAES))
@@ -379,7 +386,7 @@ namespace VeraCrypt
 					dmCreateArgs << nativeDevPath << " 0";
 
 				SecureBuffer dmCreateArgsBuf (dmCreateArgs.str().size());
-				dmCreateArgsBuf.CopyFrom (ConstBufferPtr ((byte *) dmCreateArgs.str().c_str(), dmCreateArgs.str().size()));
+				dmCreateArgsBuf.CopyFrom (ConstBufferPtr ((uint8 *) dmCreateArgs.str().c_str(), dmCreateArgs.str().size()));
 
 				// Keys
 				const SecureBuffer &cipherKey = cipher.GetKey();
@@ -489,6 +496,6 @@ namespace VeraCrypt
 		}
 	}
 
-	auto_ptr <CoreBase> Core (new CoreServiceProxy <CoreLinux>);
-	auto_ptr <CoreBase> CoreDirect (new CoreLinux);
+	unique_ptr <CoreBase> Core (new CoreServiceProxy <CoreLinux>);
+	unique_ptr <CoreBase> CoreDirect (new CoreLinux);
 }

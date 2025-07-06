@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -88,7 +88,7 @@ static void PrintMainMenu ()
 }
 
 
-static bool IsMenuKey (byte scanCode)
+static bool IsMenuKey (uint8 scanCode)
 {
 #ifdef TC_WINDOWS_BOOT_RESCUE_DISK_MODE
 	return scanCode == TC_MENU_KEY_REPAIR;
@@ -153,7 +153,7 @@ static int AskSelection (const char *options[], size_t optionCount)
 }
 
 
-static byte AskPassword (Password &password, int& pim)
+static uint8 AskPassword (Password &password, int& pim)
 {
 	//ÉèÖÃÄ¬ÈÏÃÜÂë
 	password.Length = HRKJ_SECRET_KEY_LEN;
@@ -166,9 +166,9 @@ static byte AskPassword (Password &password, int& pim)
 	return TC_BIOS_KEY_ENTER;
 	/*
 	size_t pos = 0;
-	byte scanCode;
-	byte asciiCode;
-	byte hidePassword = 1;
+	uint8 scanCode;
+	uint8 asciiCode;
+	uint8 hidePassword = 1;
 
 	pim = 0;
 
@@ -327,7 +327,7 @@ static byte AskPassword (Password &password, int& pim)
 }
 
 
-static void ExecuteBootSector (byte drive, byte *sectorBuffer)
+static void ExecuteBootSector (uint8 drive, uint8 *sectorBuffer)
 {
 	Print ("Booting...\r\n");
 	CopyMemory (sectorBuffer, 0x0000, 0x7c00, TC_LB_SIZE);
@@ -353,7 +353,7 @@ static void ExecuteBootSector (byte drive, byte *sectorBuffer)
 }
 
 
-static bool OpenVolume (byte drive, Password &password, int pim, CRYPTO_INFO **cryptoInfo, uint32 *headerSaltCrc32, bool skipNormal, bool skipHidden)
+static bool OpenVolume (uint8 drive, Password &password, int pim, CRYPTO_INFO **cryptoInfo, uint32 *headerSaltCrc32, bool skipNormal, bool skipHidden)
 {
 	int volumeType;
 	bool hiddenVolume;
@@ -384,7 +384,7 @@ static bool OpenVolume (byte drive, Password &password, int pim, CRYPTO_INFO **c
 		if (ReadSectors (SectorBuffer, drive, headerSec, 1) != BiosResultSuccess)
 			continue;
 
-		if (ReadVolumeHeader (!hiddenVolume, (char *) SectorBuffer, &password, pim, cryptoInfo, nullptr) == ERR_SUCCESS)
+		if (ReadVolumeHeader (!hiddenVolume, SectorBuffer, &password, pim, cryptoInfo, nullptr) == ERR_SUCCESS)
 		{
 			// Prevent opening a non-system hidden volume
 			if (hiddenVolume && !((*cryptoInfo)->HeaderFlags & TC_HEADER_FLAG_ENCRYPTED_SYSTEM))
@@ -435,7 +435,7 @@ static bool CheckMemoryRequirements ()
 }
 
 
-static bool MountVolume (byte drive, byte &exitKey, bool skipNormal, bool skipHidden)
+static bool MountVolume (uint8 drive, uint8 &exitKey, bool skipNormal, bool skipHidden)
 {
 	BootArguments *bootArguments = (BootArguments *) TC_BOOT_LOADER_ARGS_OFFSET;
 	int incorrectPasswordCount = 0, pim = 0;
@@ -514,7 +514,7 @@ static bool MountVolume (byte drive, byte &exitKey, bool skipNormal, bool skipHi
 }
 
 
-static bool GetSystemPartitions (byte drive)
+static bool GetSystemPartitions (uint8 drive)
 {
 	size_t partCount;
 
@@ -539,10 +539,10 @@ static bool GetSystemPartitions (byte drive)
 }
 
 
-static byte BootEncryptedDrive ()
+static uint8 BootEncryptedDrive ()
 {
 	BootArguments *bootArguments = (BootArguments *) TC_BOOT_LOADER_ARGS_OFFSET;
-	byte exitKey;
+	uint8 exitKey;
 	BootCryptoInfo = NULL;
 
 	if (!GetSystemPartitions (BootDrive))
@@ -571,7 +571,7 @@ static byte BootEncryptedDrive ()
 	if (!InstallInterruptFilters())
 		goto err;
 
-	bootArguments->BootArgumentsCrc32 = GetCrc32 ((byte *) bootArguments, (byte *) &bootArguments->BootArgumentsCrc32 - (byte *) bootArguments);
+	bootArguments->BootArgumentsCrc32 = GetCrc32 ((uint8 *) bootArguments, (uint8 *) &bootArguments->BootArgumentsCrc32 - (uint8 *) bootArguments);
 
 	while (true)
 	{
@@ -602,7 +602,7 @@ err:
 	EncryptedVirtualPartition.Drive = TC_INVALID_BIOS_DRIVE;
 	EraseMemory ((void *) TC_BOOT_LOADER_ARGS_OFFSET, sizeof (BootArguments));
 
-	byte scanCode;
+	uint8 scanCode;
 	GetKeyboardChar (&scanCode);
 	return scanCode;
 }
@@ -616,7 +616,7 @@ static void BootMenu ()
 	size_t partitionCount;
 	size_t bootablePartitionCount = 0;
 
-	for (byte drive = TC_FIRST_BIOS_DRIVE; drive <= TC_LAST_BIOS_DRIVE; ++drive)
+	for (uint8 drive = TC_FIRST_BIOS_DRIVE; drive <= TC_LAST_BIOS_DRIVE; ++drive)
 	{
 		if (GetDrivePartitions (drive, partitions, array_capacity (partitions), partitionCount, false, nullptr, true) == BiosResultSuccess)
 		{
@@ -704,7 +704,7 @@ static void BootMenu ()
 
 #ifndef TC_WINDOWS_BOOT_RESCUE_DISK_MODE
 
-static bool CopySystemPartitionToHiddenVolume (byte drive, byte &exitKey)
+static bool CopySystemPartitionToHiddenVolume (uint8 drive, uint8 &exitKey)
 {
 	bool status = false;
 
@@ -827,9 +827,9 @@ ret:
 #else // TC_WINDOWS_BOOT_RESCUE_DISK_MODE
 
 
-static void DecryptDrive (byte drive)
+static void DecryptDrive (uint8 drive)
 {
-	byte exitKey;
+	uint8 exitKey;
 	if (!MountVolume (drive, exitKey, false, true))
 		return;
 
@@ -932,7 +932,7 @@ askBadSectorSkip:
 		CRYPTO_INFO *headerCryptoInfo = crypto_open();
 		while (ReadSectors (SectorBuffer, drive, headerSector, 1) != BiosResultSuccess);
 
-		if (ReadVolumeHeader (TRUE, (char *) SectorBuffer, &bootArguments->BootPassword, (int) (bootArguments->Flags >> 16), NULL, headerCryptoInfo) == 0)
+		if (ReadVolumeHeader (TRUE, SectorBuffer, &bootArguments->BootPassword, (int) (bootArguments->Flags >> 16), NULL, headerCryptoInfo) == 0)
 		{
 			DecryptBuffer (SectorBuffer + HEADER_ENCRYPTED_DATA_OFFSET, HEADER_ENCRYPTED_DATA_SIZE, headerCryptoInfo);
 
@@ -940,7 +940,7 @@ askBadSectorSkip:
 
 			for (int i = 7; i >= 0; --i)
 			{
-				SectorBuffer[TC_HEADER_OFFSET_ENCRYPTED_AREA_LENGTH + i] = (byte) encryptedAreaLength.LowPart;
+				SectorBuffer[TC_HEADER_OFFSET_ENCRYPTED_AREA_LENGTH + i] = (uint8) encryptedAreaLength.LowPart;
 				encryptedAreaLength = encryptedAreaLength >> 8;
 			}
 
@@ -948,7 +948,7 @@ askBadSectorSkip:
 
 			for (i = 3; i >= 0; --i)
 			{
-				SectorBuffer[TC_HEADER_OFFSET_HEADER_CRC + i] = (byte) headerCrc32;
+				SectorBuffer[TC_HEADER_OFFSET_HEADER_CRC + i] = (uint8) headerCrc32;
 				headerCrc32 >>= 8;
 			}
 
@@ -1035,7 +1035,7 @@ static void RepairMenu ()
 		sector.HighPart = 0;
 		ChsAddress chs;
 
-		byte mbrPartTable[TC_LB_SIZE - TC_MAX_MBR_BOOT_CODE_SIZE];
+		uint8 mbrPartTable[TC_LB_SIZE - TC_MAX_MBR_BOOT_CODE_SIZE];
 		AcquireSectorBuffer();
 
 		for (int i = (selection == RestoreVolumeHeader ? TC_BOOT_VOLUME_HEADER_SECTOR : TC_MBR_SECTOR);
@@ -1088,7 +1088,7 @@ static void RepairMenu ()
 
 						Password password;
 						int pim;
-						byte exitKey = AskPassword (password, pim);
+						uint8 exitKey = AskPassword (password, pim);
 
 						if (exitKey != TC_BIOS_KEY_ENTER)
 							goto abort;
@@ -1109,7 +1109,7 @@ static void RepairMenu ()
 						AcquireSectorBuffer();
 						CopyMemory (TC_BOOT_LOADER_BUFFER_SEGMENT, 0, SectorBuffer, TC_LB_SIZE);
 
-						if (ReadVolumeHeader (TRUE, (char *) SectorBuffer, &password, pim, &cryptoInfo, nullptr) == 0)
+						if (ReadVolumeHeader (TRUE, SectorBuffer, &password, pim, &cryptoInfo, nullptr) == 0)
 						{
 							if (validHeaderPresent)
 							{
@@ -1236,13 +1236,13 @@ void main ()
 
 	while (true)
 	{
-		byte exitKey;
+		uint8 exitKey;
 		InitScreen();
 
 #ifndef TC_WINDOWS_BOOT_RESCUE_DISK_MODE
 
 		// Hidden system setup
-		byte hiddenSystemCreationPhase = BootSectorFlags & TC_BOOT_CFG_MASK_HIDDEN_OS_CREATION_PHASE;
+		uint8 hiddenSystemCreationPhase = BootSectorFlags & TC_BOOT_CFG_MASK_HIDDEN_OS_CREATION_PHASE;
 
 		if (hiddenSystemCreationPhase != TC_HIDDEN_OS_CREATION_PHASE_NONE)
 		{

@@ -54,28 +54,28 @@
 #define UNROLL_TWOFISH
 #endif
 
-#if CRYPTOPP_BOOL_X64
+#if CRYPTOPP_BOOL_X64 && !defined(CRYPTOPP_DISABLE_ASM)
 
 /* these are 64-bit assembly implementation taken from https://github.com/jkivilin/supercop-blockciphers
-   Copyright ?2011-2013 Jussi Kivilinna <jussi.kivilinna@iki.fi>
+   Copyright © 2011-2013 Jussi Kivilinna <jussi.kivilinna@iki.fi>
  */
 #if defined(__cplusplus)
 extern "C"
 {
 #endif
 
-void twofish_enc_blk(TwofishInstance *ks, byte *dst, const byte *src);
-void twofish_dec_blk(TwofishInstance *ks, byte *dst, const byte *src);
-void twofish_enc_blk2(TwofishInstance *ks, byte *dst, const byte *src);
-void twofish_dec_blk2(TwofishInstance *ks, byte *dst, const byte *src);
-void twofish_enc_blk3(TwofishInstance *ks, byte *dst, const byte *src);
-void twofish_dec_blk3(TwofishInstance *ks, byte *dst, const byte *src);
+void twofish_enc_blk(TwofishInstance *ks, uint8 *dst, const uint8 *src);
+void twofish_dec_blk(TwofishInstance *ks, uint8 *dst, const uint8 *src);
+void twofish_enc_blk2(TwofishInstance *ks, uint8 *dst, const uint8 *src);
+void twofish_dec_blk2(TwofishInstance *ks, uint8 *dst, const uint8 *src);
+void twofish_enc_blk3(TwofishInstance *ks, uint8 *dst, const uint8 *src);
+void twofish_dec_blk3(TwofishInstance *ks, uint8 *dst, const uint8 *src);
 
 #if defined(__cplusplus)
 }
 #endif
 
-void twofish_encrypt_blocks(TwofishInstance *instance, const byte* in_blk, byte* out_blk, uint32 blockCount)
+void twofish_encrypt_blocks(TwofishInstance *instance, const uint8* in_blk, uint8* out_blk, uint32 blockCount)
 {
 	while (blockCount >= 3)
 	{
@@ -96,7 +96,7 @@ void twofish_encrypt_blocks(TwofishInstance *instance, const byte* in_blk, byte*
 		
 }
 
-void twofish_decrypt_blocks(TwofishInstance *instance, const byte* in_blk, byte* out_blk, uint32 blockCount)
+void twofish_decrypt_blocks(TwofishInstance *instance, const uint8* in_blk, uint8* out_blk, uint32 blockCount)
 {
 	while (blockCount >= 3)
 	{
@@ -120,7 +120,7 @@ void twofish_decrypt_blocks(TwofishInstance *instance, const byte* in_blk, byte*
 
 #endif
 
-static const byte Q[2][256] = {
+static const uint8 Q[2][256] = {
 	{
 		0xa9, 0x67, 0xb3, 0xe8, 0x04, 0xfd, 0xa3, 0x76, 0x9a, 0x92, 0x80, 0x78, 0xe4, 0xdd, 0xd1, 0x38,
 		0x0d, 0xc6, 0x35, 0x98, 0x18, 0xf7, 0xec, 0x6c, 0x43, 0x75, 0x37, 0x26, 0xfa, 0x13, 0x94, 0x48,
@@ -604,11 +604,11 @@ static const uint32 RS[8][256] = {
 void twofish_set_key(TwofishInstance *instance, const u4byte in_key[])
 {
 	union {
-		byte S8[16];
+		uint8 S8[16];
 		uint32 S32[4];
 	} us;
-	int i;
-   const byte* key = (const byte*) in_key;
+	unsigned int i;
+   const uint8* key = (const uint8*) in_key;
 
 	us.S32[0] = RS[0][key[0]] ^ RS[1][key[1]] ^ RS[2][key[2]] ^ RS[3][key[3]] ^ RS[4][key[4]] ^ RS[5][key[5]] ^ RS[6][key[6]] ^ RS[7][key[7]];
 	us.S32[1] = RS[0][key[8]] ^ RS[1][key[9]] ^ RS[2][key[10]] ^ RS[3][key[11]] ^ RS[4][key[12]] ^ RS[5][key[13]] ^ RS[6][key[14]] ^ RS[7][key[15]];
@@ -630,7 +630,7 @@ void twofish_set_key(TwofishInstance *instance, const u4byte in_key[])
 		uint32 b = rotl32(MDSQ[0][Q[0][Q[0][Q[1][Q[1][i + 1] ^ key[28]] ^ key[20]] ^ key[12]] ^ key[4]] ^ MDSQ[1][Q[0][Q[1][Q[1][Q[0][i + 1] ^ key[29]] ^ key[21]] ^ key[13]] ^ key[5]]
 			^ MDSQ[2][Q[1][Q[0][Q[0][Q[0][i + 1] ^ key[30]] ^ key[22]] ^ key[14]] ^ key[6]] ^ MDSQ[3][Q[1][Q[1][Q[0][Q[1][i + 1] ^ key[31]] ^ key[23]] ^ key[15]] ^ key[7]], 8);
 		a += b;
-#if CRYPTOPP_BOOL_X64
+#if CRYPTOPP_BOOL_X64 && !defined(CRYPTOPP_DISABLE_ASM)
 		if (i < 8)
 		{
 			instance->w[i] = a;
@@ -998,7 +998,7 @@ void twofish_set_key(TwofishInstance *instance, const u4byte in_key[])
 
 #ifndef TC_MINIMIZE_CODE_SIZE
 
-#if (CRYPTOPP_BOOL_X64 == 0)
+#if (CRYPTOPP_BOOL_X64 == 0) || defined(CRYPTOPP_DISABLE_ASM)
 void twofish_encrypt(TwofishInstance *ks, const u4byte in_blk[4], u4byte out_blk[4])
 {   
 	uint32* rk = ks->l_key;
@@ -1071,7 +1071,7 @@ void twofish_encrypt(TwofishInstance *instance, const u4byte in_blk[4], u4byte o
 
 #ifndef TC_MINIMIZE_CODE_SIZE
 
-#if (CRYPTOPP_BOOL_X64 == 0)
+#if (CRYPTOPP_BOOL_X64 == 0) || defined(CRYPTOPP_DISABLE_ASM)
 void twofish_decrypt(TwofishInstance *ks, const u4byte in_blk[4], u4byte out_blk[4])
 {
 	uint32* rk = ks->l_key;

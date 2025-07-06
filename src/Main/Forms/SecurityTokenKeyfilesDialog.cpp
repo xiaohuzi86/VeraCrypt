@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -12,7 +12,6 @@
 
 #include "System.h"
 #include "Main/GraphicUserInterface.h"
-#include "Common/SecurityToken.h"
 #include "NewSecurityTokenKeyfileDialog.h"
 #include "SecurityTokenKeyfilesDialog.h"
 
@@ -54,18 +53,17 @@ namespace VeraCrypt
 		wxBusyCursor busy;
 
 		SecurityTokenKeyfileListCtrl->DeleteAllItems();
-		SecurityTokenKeyfileList = SecurityToken::GetAvailableKeyfiles();
+		SecurityTokenKeyfileList = Token::GetAvailableKeyfiles(Gui->GetPreferences().EMVSupportEnabled);
 
-		size_t i = 0;
-		foreach (const SecurityTokenKeyfile &key, SecurityTokenKeyfileList)
+		foreach (const shared_ptr<TokenKeyfile> key, SecurityTokenKeyfileList)
 		{
 			vector <wstring> fields (SecurityTokenKeyfileListCtrl->GetColumnCount());
 
-			fields[ColumnSecurityTokenSlotId] = StringConverter::ToWide ((uint64) key.SlotId);
-			fields[ColumnSecurityTokenLabel] = key.Token.Label;
-			fields[ColumnSecurityTokenKeyfileLabel] = key.Id;
+			fields[ColumnSecurityTokenSlotId] = StringConverter::ToWide ((uint64) key->Token->SlotId);
+			fields[ColumnSecurityTokenLabel] = key->Token->Label;
+			fields[ColumnSecurityTokenKeyfileLabel] = key->Id;
 
-			Gui->AppendToListCtrl (SecurityTokenKeyfileListCtrl, fields, 0, &SecurityTokenKeyfileList[i++]);
+			Gui->AppendToListCtrl (SecurityTokenKeyfileListCtrl, fields, 0, key.get());
 		}
 	}
 
@@ -97,7 +95,7 @@ namespace VeraCrypt
 		{
 			foreach (long item, Gui->GetListCtrlSelectedItems (SecurityTokenKeyfileListCtrl))
 			{
-				SecurityTokenKeyfile *keyfile = reinterpret_cast <SecurityTokenKeyfile *> (SecurityTokenKeyfileListCtrl->GetItemData (item));
+				TokenKeyfile *keyfile = reinterpret_cast <TokenKeyfile *> (SecurityTokenKeyfileListCtrl->GetItemData (item));
 
 				FilePathList files = Gui->SelectFiles (this, wxEmptyString, true);
 
@@ -105,8 +103,8 @@ namespace VeraCrypt
 				{
 					wxBusyCursor busy;
 
-					vector <byte> keyfileData;
-					SecurityToken::GetKeyfileData (*keyfile, keyfileData);
+					vector <uint8> keyfileData;
+					keyfile->GetKeyfileData (keyfileData);
 
 					BufferPtr keyfileDataBuf (&keyfileData.front(), keyfileData.size());
 					finally_do_arg (BufferPtr, keyfileDataBuf, { finally_arg.Erase(); });
@@ -143,7 +141,7 @@ namespace VeraCrypt
 
 			if (keyfile.Length() > 0)
 			{
-				vector <byte> keyfileData (keyfile.Length());
+				vector <uint8> keyfileData (keyfile.Length());
 				BufferPtr keyfileDataBuf (&keyfileData.front(), keyfileData.size());
 
 				keyfile.ReadCompleteBuffer (keyfileDataBuf);
@@ -178,11 +176,25 @@ namespace VeraCrypt
 		}
 	}
 
-	void SecurityTokenKeyfilesDialog::OnListItemSelected (wxListEvent& event)
+	void SecurityTokenKeyfilesDialog::OnListItemSelected(wxListEvent &event)
 	{
 		if (event.GetItem().GetData() != (wxUIntPtr) nullptr)
 		{
-			DeleteButton->Enable();
+			BOOL deletable = true;
+			foreach(long
+			item, Gui->GetListCtrlSelectedItems(SecurityTokenKeyfileListCtrl))
+			{
+				TokenKeyfile *keyfile = reinterpret_cast <TokenKeyfile *> (SecurityTokenKeyfileListCtrl->GetItemData(item));
+				if (!keyfile->Token->isEditable())
+				{
+					deletable = false;
+					break;
+				}
+			}
+			if (deletable)
+			{
+				DeleteButton->Enable();
+			}
 			ExportButton->Enable();
 			OKButton->Enable();
 		}
@@ -192,10 +204,10 @@ namespace VeraCrypt
 	{
 		foreach (long item, Gui->GetListCtrlSelectedItems (SecurityTokenKeyfileListCtrl))
 		{
-			SecurityTokenKeyfile *key = reinterpret_cast <SecurityTokenKeyfile *> (SecurityTokenKeyfileListCtrl->GetItemData (item));
-			SelectedSecurityTokenKeyfilePaths.push_back (*key);
-		}
+			TokenKeyfile *key = reinterpret_cast <TokenKeyfile *> (SecurityTokenKeyfileListCtrl->GetItemData(item));
 
+			SelectedSecurityTokenKeyfilePaths.push_back(*key);
+		}
 		EndModal (wxID_OK);
 	}
 }

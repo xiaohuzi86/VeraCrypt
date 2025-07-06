@@ -6,7 +6,7 @@
  Encryption for the Masses 2.02a, which is Copyright (c) 1998-2000 Paul Le Roux
  and which is governed by the 'License Agreement for Encryption for the Masses'
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages. */
@@ -23,6 +23,7 @@
 #include "Random.h"
 
 #include <io.h>
+#include <strsafe.h>
 
 #ifndef SRC_POS
 #define SRC_POS (__FUNCTION__ ":" TC_TO_STRING(__LINE__))
@@ -112,7 +113,7 @@ BOOL CheckPasswordCharEncoding (HWND hPassword, Password *ptrPw)
 		wchar_t s[MAX_PASSWORD + 1];
 		len = GetWindowTextLength (hPassword);
 
-		if (len > MAX_PASSWORD)
+		if (len > (bUseLegacyMaxPasswordLength? MAX_LEGACY_PASSWORD: MAX_PASSWORD))
 			return FALSE;
 
 		GetWindowTextW (hPassword, s, sizeof (s) / sizeof (wchar_t));
@@ -137,7 +138,7 @@ BOOL CheckPasswordLength (HWND hwndDlg, unsigned __int32 passwordLength, int pim
 {
 	/*
 	BOOL bootPimCondition = (bForBoot && (bootPRF != SHA512 && bootPRF != WHIRLPOOL))? TRUE : FALSE;
-	BOOL bCustomPimSmall = ((pim != 0) && (pim < (bootPimCondition? 98 : 485)))? TRUE : FALSE;
+	BOOL bCustomPimSmall = ((pim != 0) && (pim < (bootPimCondition? 98 : bootPRF == ARGON2? 12 : 485)))? TRUE : FALSE;
 	if (passwordLength < PASSWORD_LEN_WARNING)
 	{
 		if (bCustomPimSmall)
@@ -159,7 +160,7 @@ BOOL CheckPasswordLength (HWND hwndDlg, unsigned __int32 passwordLength, int pim
 	}
 #endif
 
-	if ((pim != 0) && (pim > (bootPimCondition? 98 : 485)))
+	if ((pim != 0) && (pim > (bootPimCondition? 98 : bootPRF == ARGON2? 12 : 485)))
 	{
 		// warn that mount/boot will take more time
 		Warning ("PIM_LARGE_WARNING", hwndDlg);
@@ -169,12 +170,12 @@ BOOL CheckPasswordLength (HWND hwndDlg, unsigned __int32 passwordLength, int pim
 	return TRUE;
 }
 
-int ChangePwd (const wchar_t *lpszVolume, Password *oldPassword, int old_pkcs5, int old_pim, BOOL truecryptMode, Password *newPassword, int pkcs5, int pim, int wipePassCount, HWND hwndDlg)
+int ChangePwd (const wchar_t *lpszVolume, Password *oldPassword, int old_pkcs5, int old_pim, Password *newPassword, int pkcs5, int pim, int wipePassCount, HWND hwndDlg)
 {
 	int nDosLinkCreated = 1, nStatus = ERR_OS_ERROR;
 	wchar_t szDiskFile[TC_MAX_PATH], szCFDevice[TC_MAX_PATH];
 	wchar_t szDosDevice[TC_MAX_PATH];
-	char buffer[TC_VOLUME_HEADER_EFFECTIVE_SIZE];
+	unsigned char buffer[TC_VOLUME_HEADER_EFFECTIVE_SIZE];
 	PCRYPTO_INFO cryptoInfo = NULL, ci = NULL;
 	void *dev = INVALID_HANDLE_VALUE;
 	DWORD dwError;
@@ -192,7 +193,7 @@ int ChangePwd (const wchar_t *lpszVolume, Password *oldPassword, int old_pkcs5, 
 
 	if (oldPassword->Length == 0 || newPassword->Length == 0) return -1;
 
-	if ((wipePassCount <= 0) || (truecryptMode && (old_pkcs5 == SHA256)))
+	if (wipePassCount <= 0)
 	{
       nStatus = ERR_PARAMETER_INCORRECT;
       handleError (hwndDlg, nStatus, SRC_POS);
@@ -212,7 +213,7 @@ int ChangePwd (const wchar_t *lpszVolume, Password *oldPassword, int old_pkcs5, 
 
 	if (bDevice == FALSE)
 	{
-		wcscpy (szCFDevice, szDiskFile);
+		StringCchCopyW (szCFDevice, ARRAYSIZE(szCFDevice), szDiskFile);
 	}
 	else
 	{
@@ -226,6 +227,19 @@ int ChangePwd (const wchar_t *lpszVolume, Password *oldPassword, int old_pkcs5, 
 
 	if (dev == INVALID_HANDLE_VALUE)
 		goto error;
+	else if (!bDevice && bPreserveTimestamp)
+	{
+		// ensure that Last Access and Last Write timestamps are not modified
+		ftLastAccessTime.dwHighDateTime = 0xFFFFFFFF;
+		ftLastAccessTime.dwLowDateTime = 0xFFFFFFFF;
+
+		SetFileTime (dev, NULL, &ftLastAccessTime, NULL);
+
+		if (GetFileTime ((HANDLE) dev, &ftCreationTime, &ftLastAccessTime, &ftLastWriteTime) == 0)
+			bTimeStampValid = FALSE;
+		else
+			bTimeStampValid = TRUE;
+	}
 
 	if (bDevice)
 	{
@@ -315,13 +329,6 @@ int ChangePwd (const wchar_t *lpszVolume, Password *oldPassword, int old_pkcs5, 
 
 	SetRandomPoolEnrichedByUserStatus (FALSE); /* force the display of the random enriching dialog */
 
-	if (!bDevice && bPreserveTimestamp)
-	{
-		if (GetFileTime ((HANDLE) dev, &ftCreationTime, &ftLastAccessTime, &ftLastWriteTime) == 0)
-			bTimeStampValid = FALSE;
-		else
-			bTimeStampValid = TRUE;
-	}
 
 	for (volumeType = TC_VOLUME_TYPE_NORMAL; volumeType < TC_VOLUME_TYPE_COUNT; volumeType++)
 	{
@@ -362,9 +369,13 @@ int ChangePwd (const wchar_t *lpszVolume, Password *oldPassword, int old_pkcs5, 
 
 		/* Try to decrypt the header */
 
-		nStatus = ReadVolumeHeader (FALSE, buffer, oldPassword, old_pkcs5, old_pim, truecryptMode, &cryptoInfo, NULL);
+		nStatus = ReadVolumeHeader (FALSE, buffer, oldPassword, old_pkcs5, old_pim, &cryptoInfo, NULL);
 		if (nStatus == ERR_CIPHER_INIT_WEAK_KEY)
 			nStatus = 0;	// We can ignore this error here
+
+		// if the XTS master key is vulnerable, return error and do not allow the user to change the password since the master key will not be changed
+		if ((nStatus == 0) && cryptoInfo->bVulnerableMasterKey)
+			nStatus = ERR_XTS_MASTERKEY_VULNERABLE;
 
 		if (nStatus == ERR_PASSWORD_WRONG)
 		{
@@ -435,7 +446,7 @@ int ChangePwd (const wchar_t *lpszVolume, Password *oldPassword, int old_pkcs5, 
 				(volumeType == TC_VOLUME_TYPE_HIDDEN) ? cryptoInfo->hiddenVolumeSize : 0,
 				cryptoInfo->EncryptedAreaStart.Value,
 				cryptoInfo->EncryptedAreaLength.Value,
-				truecryptMode? 0 : cryptoInfo->RequiredProgramVersion,
+				cryptoInfo->RequiredProgramVersion,
 				cryptoInfo->HeaderFlags,
 				cryptoInfo->SectorSize,
 				wipePass < wipePassCount - 1);
@@ -489,7 +500,7 @@ int ChangePwd (const wchar_t *lpszVolume, Password *oldPassword, int old_pkcs5, 
 					cryptoInfo->VolumeSize.Value,
 					cryptoInfo->EncryptedAreaStart.Value,
 					cryptoInfo->EncryptedAreaLength.Value,
-					truecryptMode? 0 : cryptoInfo->RequiredProgramVersion,
+					cryptoInfo->RequiredProgramVersion,
 					cryptoInfo->HeaderFlags,
 					cryptoInfo->SectorSize,
 					wipePass < wipePassCount - 1);

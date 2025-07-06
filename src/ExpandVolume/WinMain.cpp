@@ -9,7 +9,7 @@
  or Copyright (c) 2012-2013 Josef Schneider <josef@netpage.dk>
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages. */
@@ -131,7 +131,7 @@ MountOptions defaultMountOptions;
 KeyFile *FirstCmdKeyFile;
 
 HBITMAP hbmLogoBitmapRescaled = NULL;
-wchar_t OrigKeyboardLayout [8+1] = L"00000409";
+wchar_t OrigKeyboardLayout [KL_NAMELENGTH] = L"00000409";
 BOOL bKeyboardLayoutChanged = FALSE;		/* TRUE if the keyboard layout was changed to the standard US keyboard layout (from any other layout). */
 BOOL bKeybLayoutAltKeyWarningShown = FALSE;	/* TRUE if the user has been informed that it is not possible to type characters by pressing keys while the right Alt key is held down. */
 
@@ -199,15 +199,40 @@ BOOL CheckSysEncMountWithoutPBA (const char *devicePath, BOOL quiet)
 
 static void InitMainDialog (HWND hwndDlg)
 {
+	MENUITEMINFOW info;
+	int i;
+	wchar_t *str;
+	int menuEntries[] = {IDM_ABOUT, IDM_HOMEPAGE};
 	/* Call the common dialog init code */
 	InitDialog (hwndDlg);
 	LocalizeDialog (hwndDlg, NULL);
+	DragAcceptFiles (hwndDlg, TRUE);
 
 	SendMessage (GetDlgItem (hwndDlg, IDC_VOLUME), CB_LIMITTEXT, TC_MAX_PATH, 0);
 	SetWindowTextW (hwndDlg, lpszTitle);
 
 	SendMessage (GetDlgItem (hwndDlg, IDC_INFOEXPAND), WM_SETFONT, (WPARAM) hBoldFont, (LPARAM) TRUE);
-	SetWindowText (GetDlgItem (hwndDlg, IDC_INFOEXPAND), szExpandVolumeInfo);
+	SetWindowText (GetDlgItem (hwndDlg, IDC_INFOEXPAND), GetString("EXPANDER_INFO"));
+
+	// Localize menu strings
+	for (i = 0; i < array_capacity (menuEntries); i++)
+	{
+		str = (wchar_t *)GetDictionaryValueByInt (menuEntries[i]);
+		if (str)
+		{
+			ZeroMemory (&info, sizeof(info));
+			info.cbSize = sizeof (info);
+			info.fMask = MIIM_TYPE;
+			info.fType = MFT_STRING;
+			if (GetMenuItemInfoW (GetMenu (hwndDlg), menuEntries[i], FALSE,  &info))
+			{
+				info.dwTypeData = str;
+				info.cch = (UINT) wcslen (str);
+
+				SetMenuItemInfoW (GetMenu (hwndDlg), menuEntries[i], FALSE,  &info);
+			}
+		}
+	}
 
 	// Resize the logo bitmap if the user has a non-default DPI
 	if (ScreenDPI != USER_DEFAULT_SCREEN_DPI
@@ -285,16 +310,19 @@ void LoadSettings (HWND hwndDlg)
 	bShowDisconnectedNetworkDrives = ConfigReadInt ("ShowDisconnectedNetworkDrives", FALSE);
 	bHideWaitingDialog = ConfigReadInt ("HideWaitingDialog", FALSE);
 	bUseSecureDesktop = ConfigReadInt ("UseSecureDesktop", FALSE);
+	bUseLegacyMaxPasswordLength = ConfigReadInt ("UseLegacyMaxPasswordLength", FALSE);
 	defaultMountOptions.Removable =	ConfigReadInt ("MountVolumesRemovable", FALSE);
 	defaultMountOptions.ReadOnly =	ConfigReadInt ("MountVolumesReadOnly", FALSE);
 	defaultMountOptions.ProtectHiddenVolume = FALSE;
 	defaultMountOptions.PartitionInInactiveSysEncScope = FALSE;
 	defaultMountOptions.RecoveryMode = FALSE;
 	defaultMountOptions.UseBackupHeader =  FALSE;
+	defaultMountOptions.SkipCachedPasswords = FALSE;
 
 	mountOptions = defaultMountOptions;
 
 	CloseSecurityTokenSessionsAfterMount = ConfigReadInt ("CloseSecurityTokenSessionsAfterMount", 0);
+	EMVSupportEnabled = ConfigReadInt ("EMVSupportEnabled", 0);
 
 	{
 		char szTmp[TC_MAX_PATH] = {0};
@@ -390,7 +418,6 @@ BOOL CALLBACK ExtcvPasswordDlgProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
 	static Password *szXPwd;
 	static int *pkcs5;
 	static int *pim;
-	static BOOL* truecryptMode;
 
 	switch (msg)
 	{
@@ -400,7 +427,6 @@ BOOL CALLBACK ExtcvPasswordDlgProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
 			szXPwd = ((PasswordDlgParam *) lParam) -> password;
 			pkcs5 = ((PasswordDlgParam *) lParam) -> pkcs5;
 			pim = ((PasswordDlgParam *) lParam) -> pim;
-			truecryptMode = ((PasswordDlgParam *) lParam) -> truecryptMode;
 			LocalizeDialog (hwndDlg, "IDD_PASSWORD_DLG");
 			DragAcceptFiles (hwndDlg, TRUE);
 
@@ -470,10 +496,6 @@ BOOL CALLBACK ExtcvPasswordDlgProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
 				EnableWindow (GetDlgItem (hwndDlg, IDC_MOUNT_OPTIONS), FALSE);
 			}
 
-			/* No support for mounting TrueCrypt volumes */
-			SetCheckBox (hwndDlg, IDC_TRUECRYPT_MODE, FALSE);
-			EnableWindow (GetDlgItem (hwndDlg, IDC_TRUECRYPT_MODE), FALSE);
-
 			if (!SetForegroundWindow (hwndDlg) && (FavoriteMountOnArrivalInProgress))
 			{
 				SetWindowPos (hwndDlg, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
@@ -494,10 +516,6 @@ BOOL CALLBACK ExtcvPasswordDlgProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
 
 	case TC_APPMSG_PREBOOT_PASSWORD_MODE:
 		{
-			/* No support for mounting TrueCrypt system partition */
-			SetCheckBox (hwndDlg, IDC_TRUECRYPT_MODE, FALSE);
-			EnableWindow (GetDlgItem (hwndDlg, IDC_TRUECRYPT_MODE), FALSE);
-
 			/* Repopulate the PRF algorithms list with algorithms that support system encryption */
 			HWND hComboBox = GetDlgItem (hwndDlg, IDC_PKCS5_PRF_ID);
 			SendMessage (hComboBox, CB_RESETCONTENT, 0, 0);
@@ -534,9 +552,12 @@ BOOL CALLBACK ExtcvPasswordDlgProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
 			SetWindowText (GetDlgItem (hwndDlg, IDC_PASSWORD), tmp);
 			SetWindowText (GetDlgItem (hwndDlg, IDC_PASSWORD), L"");
 
-			StringCbPrintfW (OrigKeyboardLayout, sizeof(OrigKeyboardLayout),L"%08X", (DWORD) GetKeyboardLayout (NULL) & 0xFFFF);
+			if (!GetKeyboardLayoutNameW(OrigKeyboardLayout))
+			{
+				StringCbPrintfW(OrigKeyboardLayout, sizeof(OrigKeyboardLayout), L"%08X", (DWORD) (DWORD_PTR) GetKeyboardLayout(NULL) & 0xFFFF);
+			}
 
-			DWORD keybLayout = (DWORD) LoadKeyboardLayout (L"00000409", KLF_ACTIVATE);
+			DWORD keybLayout = (DWORD) (DWORD_PTR) LoadKeyboardLayout (L"00000409", KLF_ACTIVATE);
 
 			if (keybLayout != 0x00000409 && keybLayout != 0x04090409)
 			{
@@ -576,7 +597,7 @@ BOOL CALLBACK ExtcvPasswordDlgProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
 		case TIMER_ID_KEYB_LAYOUT_GUARD:
 			if (bPrebootPasswordDlgMode)
 			{
-				DWORD keybLayout = (DWORD) GetKeyboardLayout (NULL);
+				DWORD keybLayout = (DWORD) (DWORD_PTR) GetKeyboardLayout (NULL);
 
 				if (keybLayout != 0x00000409 && keybLayout != 0x04090409)
 				{
@@ -589,7 +610,7 @@ BOOL CALLBACK ExtcvPasswordDlgProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
 					SetWindowText (GetDlgItem (hwndDlg, IDC_PASSWORD), tmp);
 					SetWindowText (GetDlgItem (hwndDlg, IDC_PASSWORD), L"");
 
-					keybLayout = (DWORD) LoadKeyboardLayout (L"00000409", KLF_ACTIVATE);
+					keybLayout = (DWORD) (DWORD_PTR) LoadKeyboardLayout (L"00000409", KLF_ACTIVATE);
 
 					if (keybLayout != 0x00000409 && keybLayout != 0x04090409)
 					{
@@ -673,36 +694,19 @@ BOOL CALLBACK ExtcvPasswordDlgProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
 
 			if (lw == IDOK)
 			{
+				int iMaxPasswordLength = (bUseLegacyMaxPasswordLength)? MAX_LEGACY_PASSWORD : MAX_PASSWORD;
 				if (mountOptions.ProtectHiddenVolume && hidVolProtKeyFilesParam.EnableKeyFiles)
 					KeyFilesApply (hwndDlg, &mountOptions.ProtectedHidVolPassword, hidVolProtKeyFilesParam.FirstKeyFile, PasswordDlgVolume);
 
-				if (GetPassword (hwndDlg, IDC_PASSWORD, (LPSTR) szXPwd->Text, MAX_PASSWORD + 1, TRUE))
+				if (GetPassword (hwndDlg, IDC_PASSWORD, (LPSTR) szXPwd->Text, iMaxPasswordLength + 1, FALSE, TRUE))
 					szXPwd->Length = (unsigned __int32) (strlen ((char *) szXPwd->Text));
 				else
 					return 1;
 
 				bCacheInDriver = IsButtonChecked (GetDlgItem (hwndDlg, IDC_CACHE));
 				*pkcs5 = (int) SendMessage (GetDlgItem (hwndDlg, IDC_PKCS5_PRF_ID), CB_GETITEMDATA, SendMessage (GetDlgItem (hwndDlg, IDC_PKCS5_PRF_ID), CB_GETCURSEL, 0, 0), 0);
-				*truecryptMode = GetCheckBox (hwndDlg, IDC_TRUECRYPT_MODE);
 
 				*pim = GetPim (hwndDlg, IDC_PIM, 0);
-
-				/* check that PRF is supported in TrueCrypt Mode */
-				if (	(*truecryptMode)
-					&& ((!is_pkcs5_prf_supported(*pkcs5, TRUE, PRF_BOOT_NO)) || (mountOptions.ProtectHiddenVolume && !is_pkcs5_prf_supported(mountOptions.ProtectedHidVolPkcs5Prf, TRUE, PRF_BOOT_NO)))
-					)
-				{
-					Error ("ALGO_NOT_SUPPORTED_FOR_TRUECRYPT_MODE", hwndDlg);
-					return 1;
-				}
-
-				if (	(*truecryptMode)
-					&&	(*pim != 0)
-					)
-				{
-					Error ("PIM_NOT_SUPPORTED_FOR_TRUECRYPT_MODE", hwndDlg);
-					return 1;
-				}
 			}
 
 			// Attempt to wipe password stored in the input field buffer
@@ -779,6 +783,10 @@ BOOL CALLBACK ExtcvPasswordDlgProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
 			DragFinish (hdrop);
 		}
 		return 1;
+
+	case WM_DESTROY:
+		DetachProtectionFromCurrentThread();
+		break;
 	}
 
 	return 0;
@@ -801,7 +809,7 @@ int RestoreVolumeHeader (HWND hwndDlg, char *lpszVolume)
 	return 0;
 }
 
-int ExtcvAskVolumePassword (HWND hwndDlg, const wchar_t* fileName, Password *password, int *pkcs5, int *pim, BOOL* truecryptMode, char *titleStringId, BOOL enableMountOptions)
+int ExtcvAskVolumePassword (HWND hwndDlg, const wchar_t* fileName, Password *password, int *pkcs5, int *pim, char *titleStringId, BOOL enableMountOptions)
 {
 	INT_PTR result;
 	PasswordDlgParam dlgParam;
@@ -812,7 +820,6 @@ int ExtcvAskVolumePassword (HWND hwndDlg, const wchar_t* fileName, Password *pas
 	dlgParam.password = password;
 	dlgParam.pkcs5 = pkcs5;
 	dlgParam.pim = pim;
-	dlgParam.truecryptMode = truecryptMode;
 
 	StringCbCopyW (PasswordDlgVolume, sizeof(PasswordDlgVolume), fileName);
 
@@ -825,7 +832,6 @@ int ExtcvAskVolumePassword (HWND hwndDlg, const wchar_t* fileName, Password *pas
 		password->Length = 0;
 		*pkcs5 = 0;
 		*pim = 0;
-		*truecryptMode = FALSE;
 		burn (&mountOptions.ProtectedHidVolPassword, sizeof (mountOptions.ProtectedHidVolPassword));
 		burn (&mountOptions.ProtectedHidVolPkcs5Prf, sizeof (mountOptions.ProtectedHidVolPkcs5Prf));
 	}
@@ -837,7 +843,7 @@ int ExtcvAskVolumePassword (HWND hwndDlg, const wchar_t* fileName, Password *pas
 
 static BOOL SelectContainer (HWND hwndDlg)
 {
-	if (BrowseFiles (hwndDlg, "OPEN_VOL_TITLE", szFileName, bHistory, FALSE, NULL) == FALSE)
+	if (BrowseFiles (hwndDlg, "OPEN_VOL_TITLE", szFileName, bHistory, FALSE) == FALSE)
 		return FALSE;
 
 	AddComboItem (GetDlgItem (hwndDlg, IDC_VOLUME), szFileName, bHistory);
@@ -863,6 +869,96 @@ static BOOL SelectPartition (HWND hwndDlg)
 	return FALSE;
 }
 
+void ExtractCommandLine (HWND hwndDlg, wchar_t *lpszCommandLine)
+{
+	wchar_t **lpszCommandLineArgs = NULL;	/* Array of command line arguments */
+	int nNoCommandLineArgs;	/* The number of arguments in the array */
+
+	/* Extract command line arguments */
+	nNoCommandLineArgs = Win32CommandLine (&lpszCommandLineArgs);
+	if (nNoCommandLineArgs > 0)
+	{
+		int i;
+
+		for (i = 0; i < nNoCommandLineArgs; i++)
+		{
+			enum
+			{
+				OptionEnableMemoryProtection,
+				OptionEnableScreenProtection,
+			};
+
+			argument args[]=
+			{
+				{ OptionEnableMemoryProtection,	L"/protectMemory",	NULL, FALSE },
+				{ OptionEnableScreenProtection,	L"/protectScreen",	NULL, FALSE },
+			};
+
+			argumentspec as;
+
+			int x;
+			wchar_t szTmp[32] = {0};
+
+			if (lpszCommandLineArgs[i] == NULL)
+				continue;
+
+			as.args = args;
+			as.arg_cnt = sizeof(args)/ sizeof(args[0]);
+
+			x = GetArgumentID (&as, lpszCommandLineArgs[i]);
+
+			switch (x)
+			{
+
+			case OptionEnableMemoryProtection:
+				if (HAS_ARGUMENT == GetArgumentValue (lpszCommandLineArgs,
+					&i, nNoCommandLineArgs, szTmp, ARRAYSIZE (szTmp)))
+				{
+					if ((!_wcsicmp (szTmp, L"no") || !_wcsicmp (szTmp, L"n")) && IsNonInstallMode())
+						EnableMemoryProtection = FALSE;
+					else if (!_wcsicmp (szTmp, L"yes") || !_wcsicmp (szTmp, L"y"))
+						EnableMemoryProtection = TRUE;
+					else
+						AbortProcess ("COMMAND_LINE_ERROR");
+				}
+				else
+					EnableMemoryProtection = TRUE;
+				break;
+
+			case OptionEnableScreenProtection:
+				if (HAS_ARGUMENT == GetArgumentValue (lpszCommandLineArgs,
+					&i, nNoCommandLineArgs, szTmp, ARRAYSIZE (szTmp)))
+				{
+					if ((!_wcsicmp (szTmp, L"no") || !_wcsicmp (szTmp, L"n")) && IsNonInstallMode())
+						EnableScreenProtection = FALSE;
+					else if (!_wcsicmp (szTmp, L"yes") || !_wcsicmp (szTmp, L"y"))
+						EnableScreenProtection = TRUE;
+					else
+						AbortProcess ("COMMAND_LINE_ERROR");
+				}
+				else
+					EnableScreenProtection = TRUE;
+				break;
+
+			default:
+				DialogBoxParamW (hInst, MAKEINTRESOURCEW (IDD_COMMANDHELP_DLG), hwndDlg, (DLGPROC)
+						CommandHelpDlgProc, (LPARAM) &as);
+
+				exit(0);
+			}
+		}
+	}
+
+	/* Free up the command line arguments */
+	while (--nNoCommandLineArgs >= 0)
+	{
+		free (lpszCommandLineArgs[nNoCommandLineArgs]);
+	}
+
+	if (lpszCommandLineArgs)
+		free (lpszCommandLineArgs);
+}
+
 
 /* Except in response to the WM_INITDIALOG and WM_ENDSESSION messages, the dialog box procedure
    should return nonzero if it processes a message, and zero if it does not. */
@@ -885,6 +981,9 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 			bShowDisconnectedNetworkDrives = FALSE;
 			bHideWaitingDialog = FALSE;
 			bUseSecureDesktop = FALSE;
+			bUseLegacyMaxPasswordLength = FALSE;
+
+			VeraCryptExpander::ExtractCommandLine (hwndDlg, (wchar_t *) lParam);
 
 			if (UsePreferences)
 			{
@@ -921,6 +1020,17 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 		localcleanup ();
 		return 0;
 
+	case WM_DROPFILES:
+		{
+			HDROP hdrop = (HDROP) wParam;
+			DragQueryFile (hdrop, 0, szFileName, ARRAYSIZE (szFileName));
+			DragFinish (hdrop);
+
+			AddComboItem (GetDlgItem (hwndDlg, IDC_VOLUME), szFileName, bHistory);
+			SetFocus (GetDlgItem (hwndDlg, IDOK));
+		}
+		return 1;
+
 	case WM_COMMAND:
 
 		if (lw == IDCANCEL || lw == IDC_EXIT)
@@ -939,7 +1049,12 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 			{
 				wchar_t fileName[MAX_PATH];
 				GetWindowText (GetDlgItem (hwndDlg, IDC_VOLUME), fileName, ARRAYSIZE (fileName));
-				ExpandVolumeWizard(hwndDlg, fileName);
+				if (!VolumePathExists (fileName))
+				{
+					handleWin32Error (hwndDlg, SRC_POS);
+				}
+				else
+					ExpandVolumeWizard(hwndDlg, fileName);
 			}
 			return 1;
 		}
@@ -953,7 +1068,7 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 		if (lw == IDM_HOMEPAGE )
 		{
 			ArrowWaitCursor ();
-			ShellExecute (NULL, L"open", L"https://www.veracrypt.fr", NULL, NULL, SW_SHOWNORMAL);
+			SafeOpenURL (L"https://veracrypt.jp");
 			Sleep (200);
 			NormalCursor ();
 
@@ -978,6 +1093,10 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 		VeraCryptExpander::EndMainDlg (hwndDlg);
 		return 1;
 
+	case WM_DESTROY:
+		DetachProtectionFromCurrentThread();
+		break;
+
 	default:
 		;
 	}
@@ -991,6 +1110,48 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 int WINAPI wWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, wchar_t *lpszCommandLine, int nCmdShow)
 {
 	int status;
+	int argc;
+	LPWSTR *argv = CommandLineToArgvW (GetCommandLineW(), &argc);
+
+	for (int i = 0; argv && i < argc; i++)
+	{
+		if (_wcsicmp (argv[i], L"/protectScreen") == 0)
+		{
+			if ((i < argc - 1) && _wcsicmp (argv[i + 1], L"no") == 0)
+			{
+				// Disabling screen protection is only allowed in portable mode
+				if (IsNonInstallMode())
+					EnableScreenProtection = FALSE;
+			}
+			else
+			{
+				EnableScreenProtection = TRUE;
+			}
+		}
+		if (_wcsicmp (argv[i], L"/protectMemory") == 0)
+		{
+			if ((i < argc - 1) && _wcsicmp (argv[i + 1], L"no") == 0)
+			{
+				// Disabling memory protection is only allowed in portable mode
+				if (IsNonInstallMode())
+					EnableMemoryProtection = FALSE;
+			}
+			else
+			{
+				EnableMemoryProtection = TRUE;
+			}
+		}
+	}
+
+	LocalFree (argv); // free memory allocated by CommandLineToArgvW
+
+	if (EnableMemoryProtection)
+	{
+		/* Protect this process memory from being accessed by non-admin users */
+		ActivateMemoryProtection ();
+	}
+
+	ScreenCaptureBlocker blocker;
 	atexit (VeraCryptExpander::localcleanup);
 	SetProcessShutdownParameters (0x100, 0);
 
@@ -1005,7 +1166,11 @@ int WINAPI wWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, wchar_t *lpsz
 	/* application title */
 	lpszTitle = L"VeraCrypt Expander";
 
-	DetectX86Features ();
+#ifndef _M_ARM64
+	DetectX86Features();
+#else
+	DetectArmFeatures();
+#endif
 
 	status = DriverAttach ();
 	if (status != 0)

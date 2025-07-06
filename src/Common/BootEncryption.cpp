@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -275,9 +275,30 @@ bool ZipAdd (zip_t *z, const char* name, const unsigned char* pbData, DWORD cbDa
 	return true;
 }
 
+static BOOL IsWindowsMBR (const uint8 *buffer, size_t bufferSize)
+{
+	BOOL bRet = FALSE;
+	uint8 g_pbMsSignature[4] = {0x33, 0xc0, 0x8e, 0xd0};
+	const char* g_szStr1 = "Invalid partition table";
+	const char* g_szStr2 = "Error loading operating system";
+	const char* g_szStr3 = "Missing operating system";
+
+	if ((0 == memcmp (buffer, g_pbMsSignature, 4)) &&
+		(BufferContainsString (buffer, bufferSize, g_szStr1) 
+		|| BufferContainsString (buffer, bufferSize, g_szStr2) 
+		|| BufferContainsString (buffer, bufferSize, g_szStr3)
+		)
+		)
+	{
+		bRet = TRUE;
+	}
+
+	return bRet;
+}
+
 namespace VeraCrypt
 {
-#if !defined (SETUP)
+#if !defined (SETUP) && !defined (VCSDK_DLL)
 
 	class Elevator
 	{
@@ -369,7 +390,7 @@ namespace VeraCrypt
 			}
 		}
 
-		static void ReadWriteFile (BOOL write, BOOL device, const wstring &filePath, byte *buffer, uint64 offset, uint32 size, DWORD *sizeDone)
+		static void ReadWriteFile (BOOL write, BOOL device, const wstring &filePath, uint8 *buffer, uint64 offset, uint32 size, DWORD *sizeDone)
 		{
 			Elevate();
 
@@ -610,7 +631,7 @@ namespace VeraCrypt
 			}
 		}
 
-		static void WriteEfiBootSectorUserConfig (byte userConfig, const string &customUserMessage, int pim, int hashAlg)
+		static void WriteEfiBootSectorUserConfig (uint8 userConfig, const string &customUserMessage, int pim, int hashAlg)
 		{
 			Elevate();
 
@@ -639,6 +660,18 @@ namespace VeraCrypt
 			Elevate();
 
 			DWORD result = ElevatedComInstance->UpdateSetupConfigFile (bForInstall ? TRUE : FALSE);
+			if (result != ERROR_SUCCESS)
+			{
+				SetLastError (result);
+				throw SystemException(SRC_POS);
+			}
+		}
+
+		static void NotifyService (DWORD dwNotifyCmd)
+		{
+			Elevate();
+
+			DWORD result = ElevatedComInstance->NotifyService (dwNotifyCmd);
 			if (result != ERROR_SUCCESS)
 			{
 				SetLastError (result);
@@ -679,7 +712,7 @@ namespace VeraCrypt
 
 			if (!ElevatedComInstance || ElevatedComInstanceThreadId != GetCurrentThreadId())
 			{
-				CoInitialize (NULL);
+				CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 				ElevatedComInstance = GetElevatedInstance (GetActiveWindow() ? GetActiveWindow() : MainDlg);
 				ElevatedComInstanceThreadId = GetCurrentThreadId();
 			}
@@ -709,7 +742,7 @@ namespace VeraCrypt
 	public:
 		static void AddReference () { }
 		static void CallDriver (DWORD ioctl, void *input, DWORD inputSize, void *output, DWORD outputSize) { throw ParameterIncorrect (SRC_POS); }
-		static void ReadWriteFile (BOOL write, BOOL device, const wstring &filePath, byte *buffer, uint64 offset, uint32 size, DWORD *sizeDone) { throw ParameterIncorrect (SRC_POS); }
+		static void ReadWriteFile (BOOL write, BOOL device, const wstring &filePath, uint8 *buffer, uint64 offset, uint32 size, DWORD *sizeDone) { throw ParameterIncorrect (SRC_POS); }
 		static void RegisterFilterDriver (bool registerDriver, BootEncryption::FilterType filterType) { throw ParameterIncorrect (SRC_POS); }
 		static void Release () { }
 		static void SetDriverServiceStartType (DWORD startType) { throw ParameterIncorrect (SRC_POS); }
@@ -719,9 +752,15 @@ namespace VeraCrypt
 		static void BackupEfiSystemLoader () { throw ParameterIncorrect (SRC_POS); }
 		static void RestoreEfiSystemLoader () { throw ParameterIncorrect (SRC_POS); }
 		static void GetEfiBootDeviceNumber (PSTORAGE_DEVICE_NUMBER pSdn) { throw ParameterIncorrect (SRC_POS); }
-		static void WriteEfiBootSectorUserConfig (byte userConfig, const string &customUserMessage, int pim, int hashAlg) { throw ParameterIncorrect (SRC_POS); }
+		static void WriteEfiBootSectorUserConfig (uint8 userConfig, const string &customUserMessage, int pim, int hashAlg) { throw ParameterIncorrect (SRC_POS); }
 		static void UpdateSetupConfigFile (bool bForInstall) { throw ParameterIncorrect (SRC_POS); }
 		static void GetSecureBootConfig (BOOL* pSecureBootEnabled, BOOL *pVeraCryptKeysLoaded) { throw ParameterIncorrect (SRC_POS); }
+		static void RegisterSystemFavoritesService(BOOL registerService) { throw ParameterIncorrect(SRC_POS); }
+		static BOOL IsPagingFileActive(BOOL checkNonWindowsPartitionsOnly) { throw ParameterIncorrect(SRC_POS); }
+		static void WriteLocalMachineRegistryDwordValue(wchar_t* keyPath, wchar_t* valueName, DWORD value) { throw ParameterIncorrect(SRC_POS); }
+		static void NotifyService(DWORD dwNotifyCmd) { throw ParameterIncorrect(SRC_POS); }
+		static void CopyFile(const wstring& sourceFile, const wstring& destinationFile) { throw ParameterIncorrect(SRC_POS); }
+		static void DeleteFile(const wstring& file) { throw ParameterIncorrect(SRC_POS); }
 	};
 
 #endif // SETUP
@@ -740,11 +779,13 @@ namespace VeraCrypt
 		else
 		{
 			LastError = GetLastError();
+#ifndef SETUP
 			if (LastError == ERROR_ACCESS_DENIED && IsUacSupported())
 			{
 				Elevated = true;
 				FileOpen = true;
 			}
+#endif
 		}
 
 		FilePointerPosition = 0;
@@ -763,7 +804,7 @@ namespace VeraCrypt
 		FileOpen = false;
 	}
 
-	DWORD File::Read (byte *buffer, DWORD size)
+	DWORD File::Read (uint8 *buffer, DWORD size)
 	{
 		DWORD bytesRead;
 
@@ -773,14 +814,14 @@ namespace VeraCrypt
 			throw SystemException (SRC_POS);
 		}
 
+#ifndef SETUP
 		if (Elevated)
 		{
-			DWORD bytesRead;
-
 			Elevator::ReadWriteFile (false, IsDevice, Path, buffer, FilePointerPosition, size, &bytesRead);
 			FilePointerPosition += bytesRead;
 			return bytesRead;
 		}
+#endif
 
 		if (!ReadFile (Handle, buffer, size, &bytesRead, NULL))
 		{
@@ -870,7 +911,7 @@ namespace VeraCrypt
 		dwSize = (DWORD) size64;
 	}
 
-	void File::Write (byte *buffer, DWORD size)
+	void File::Write (uint8 *buffer, DWORD size)
 	{
 		DWORD bytesWritten;
 
@@ -882,6 +923,7 @@ namespace VeraCrypt
 
 		try
 		{
+#ifndef SETUP
 			if (Elevated)
 			{
 				Elevator::ReadWriteFile (true, IsDevice, Path, buffer, FilePointerPosition, size, &bytesWritten);
@@ -889,6 +931,7 @@ namespace VeraCrypt
 				throw_sys_if (bytesWritten != size);
 			}
 			else
+#endif
 			{
 				if (!WriteFile (Handle, buffer, size, &bytesWritten, NULL))
 				{
@@ -994,10 +1037,16 @@ namespace VeraCrypt
 
 	Device::Device (wstring path, bool readOnly)
 	{
-		 FileOpen = false;
-		 Elevated = false;
+		wstring effectivePath;
+		FileOpen = false;
+		Elevated = false;
 
-		Handle = CreateFile ((wstring (L"\\\\.\\") + path).c_str(),
+		if (path.find(L"\\\\?\\") == 0)
+			effectivePath = path;
+		else
+			effectivePath = wstring (L"\\\\.\\") + path;
+
+		Handle = CreateFile (effectivePath.c_str(),
 			readOnly ? GENERIC_READ : GENERIC_READ | GENERIC_WRITE,
 			FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
 			FILE_FLAG_RANDOM_ACCESS | FILE_FLAG_WRITE_THROUGH, NULL);
@@ -1009,11 +1058,13 @@ namespace VeraCrypt
 		else
 		{
 			LastError = GetLastError ();
+#ifndef SETUP
 			if (LastError == ERROR_ACCESS_DENIED && IsUacSupported())
 			{
 				Elevated = true;
 				FileOpen = true;
 			}
+#endif
 		}
 
 		FilePointerPosition = 0;
@@ -1024,7 +1075,7 @@ namespace VeraCrypt
 
 	static EfiBoot EfiBootInst;
 
-	BootEncryption::BootEncryption (HWND parent, bool postOOBE)
+	BootEncryption::BootEncryption (HWND parent, bool postOOBE, bool setBootEntry, bool forceFirstBootEntry, bool setBootNext)
 		: DriveConfigValid (false),
 		ParentWindow (parent),
 		RealSystemDriveSizeValid (false),
@@ -1035,7 +1086,10 @@ namespace VeraCrypt
 		SelectedEncryptionAlgorithmId (0),
 		SelectedPrfAlgorithmId (0),
 		VolumeHeaderValid (false),
-		PostOOBEMode (postOOBE)
+		PostOOBEMode (postOOBE),
+		SetBootNext (setBootNext),
+		SetBootEntry (setBootEntry),
+		ForceFirstBootEntry (forceFirstBootEntry)
 	{
       HiddenOSCandidatePartition.IsGPT = FALSE;
       HiddenOSCandidatePartition.Number = (size_t) -1;
@@ -1101,26 +1155,26 @@ namespace VeraCrypt
 //				throw ParameterIncorrect (SRC_POS);	// It is assumed that CheckRequirements() had been called
 
 			// Find the first active partition on the system drive
-			foreach (const Partition &partition, config.Partitions)
+			for (const Partition& partition : config.Partitions)
 			{
 				if (partition.Info.BootIndicator)
 				{
 					if (partition.Info.PartitionNumber != config.SystemPartition.Number)
 					{
 						// If there is an extra boot partition, the system partition must be located right behind it
-						if (IsOSAtLeast (WIN_7) && config.ExtraBootPartitionPresent)
+						if (config.ExtraBootPartitionPresent)
 						{
 							int64 minOffsetFound = config.DrivePartition.Info.PartitionLength.QuadPart;
 							Partition bootPartition = partition;
 							Partition partitionBehindBoot;
 
-							foreach (const Partition &partition, config.Partitions)
+							for (const Partition &otherPartition : config.Partitions)
 							{
-								if (partition.Info.StartingOffset.QuadPart > bootPartition.Info.StartingOffset.QuadPart
-									&& partition.Info.StartingOffset.QuadPart < minOffsetFound)
+								if (otherPartition.Info.StartingOffset.QuadPart > bootPartition.Info.StartingOffset.QuadPart
+									&& otherPartition.Info.StartingOffset.QuadPart < minOffsetFound)
 								{
-									minOffsetFound = partition.Info.StartingOffset.QuadPart;
-									partitionBehindBoot = partition;
+									minOffsetFound = otherPartition.Info.StartingOffset.QuadPart;
+									partitionBehindBoot = otherPartition;
 								}
 							}
 
@@ -1236,32 +1290,9 @@ namespace VeraCrypt
 
 		finally_do_arg (SC_HANDLE, service, { CloseServiceHandle (finally_arg); });
 
-		// Windows versions preceding Vista can be installed on FAT filesystem which does not
-		// support long filenames during boot. Convert the driver path to short form if required.
-		wstring driverPath;
-		if (startOnBoot && !IsOSAtLeast (WIN_VISTA))
-		{
-			wchar_t pathBuf[MAX_PATH];
-			wchar_t filesystem[128];
-
-			wstring path (GetWindowsDirectory());
-			path += L"\\drivers\\veracrypt.sys";
-
-			if (GetVolumePathName (path.c_str(), pathBuf, ARRAYSIZE (pathBuf))
-				&& GetVolumeInformation (pathBuf, NULL, 0, NULL, NULL, NULL, filesystem, ARRAYSIZE(filesystem))
-				&& wmemcmp (filesystem, L"FAT", 3) == 0)
-			{
-				throw_sys_if (GetShortPathName (path.c_str(), pathBuf, ARRAYSIZE (pathBuf)) == 0);
-
-				// Convert absolute path to relative to the Windows directory
-				driverPath = pathBuf;
-				driverPath = driverPath.substr (driverPath.rfind (L"\\", driverPath.rfind (L"\\", driverPath.rfind (L"\\") - 1) - 1) + 1);
-			}
-		}
-
 		throw_sys_if (!ChangeServiceConfig (service, SERVICE_NO_CHANGE, SERVICE_NO_CHANGE,
 			startOnBoot ? SERVICE_ERROR_SEVERE : SERVICE_ERROR_NORMAL,
-			driverPath.empty() ? NULL : driverPath.c_str(),
+			NULL,
 			startOnBoot ? L"Filter" : NULL,
 			NULL, NULL, NULL, NULL, NULL));
 
@@ -1334,11 +1365,11 @@ namespace VeraCrypt
 				part.IsGPT = diskPartInfo.IsGPT;
 
 				// Mount point
-				int driveNumber = GetDiskDeviceDriveLetter ((wchar_t *) partPath.str().c_str());
+				int driveLetter = GetDiskDeviceDriveLetter ((wchar_t *) partPath.str().c_str());
 
-				if (driveNumber >= 0)
+				if (driveLetter >= 0)
 				{
-					part.MountPoint += (wchar_t) (driveNumber + L'A');
+					part.MountPoint += (wchar_t) (driveLetter + L'A');
 					part.MountPoint += L":";
 				}
 
@@ -1406,7 +1437,7 @@ namespace VeraCrypt
 		return version;
 	}
 
-	void BootEncryption::GetInstalledBootLoaderFingerprint (byte fingerprint[WHIRLPOOL_DIGESTSIZE + SHA512_DIGESTSIZE])
+	void BootEncryption::GetInstalledBootLoaderFingerprint (uint8 fingerprint[WHIRLPOOL_DIGESTSIZE + SHA512_DIGESTSIZE])
 	{
 		BootLoaderFingerprintRequest request;
 		CallDriver (VC_IOCTL_GET_BOOT_LOADER_FINGERPRINT, NULL, 0, &request, sizeof (request));
@@ -1445,6 +1476,7 @@ namespace VeraCrypt
 		/* IMPORTANT: Do NOT add any potentially time-consuming operations to this function. */
 
 		BootEncryptionStatus status;
+		memset (&status, 0, sizeof(status));
 		CallDriver (TC_IOCTL_GET_BOOT_ENCRYPTION_STATUS, NULL, 0, &status, sizeof (status));
 		return status;
 	}
@@ -1468,12 +1500,12 @@ namespace VeraCrypt
 	}
 
 
-	bool BootEncryption::SystemDriveContainsPartitionType (byte type)
+	bool BootEncryption::SystemDriveContainsPartitionType (uint8 type)
 	{
 		Device device (GetSystemDriveConfiguration().DevicePath, true);
 		device.CheckOpened (SRC_POS);
 
-		byte mbrBuf[TC_SECTOR_SIZE_BIOS];
+		uint8 mbrBuf[TC_SECTOR_SIZE_BIOS];
 		device.SeekAt (0);
 		device.Read (mbrBuf, sizeof (mbrBuf));
 
@@ -1515,7 +1547,7 @@ namespace VeraCrypt
 				continue;
 			}
 
-			if (SystemDriveContainsPartitionType ((byte) partitionType))
+			if (SystemDriveContainsPartitionType ((uint8) partitionType))
 				return true;
 		}
 
@@ -1621,8 +1653,7 @@ namespace VeraCrypt
 	{
 		SystemDriveConfiguration config = GetSystemDriveConfiguration();
 
-		if (IsOSAtLeast (WIN_7)
-			&& config.Partitions.size() == 2
+		if (config.Partitions.size() == 2
 			&& config.ExtraBootPartitionPresent
 			&& config.DrivePartition.Info.PartitionLength.QuadPart - config.SystemPartition.Info.PartitionLength.QuadPart < 164 * BYTES_PER_MB)
 		{
@@ -1634,7 +1665,7 @@ namespace VeraCrypt
 	}
 
 
-	uint32 BootEncryption::GetChecksum (byte *data, size_t size)
+	uint32 BootEncryption::GetChecksum (uint8 *data, size_t size)
 	{
 		uint32 sum = 0;
 
@@ -1648,7 +1679,7 @@ namespace VeraCrypt
 	}
 
 
-	void BootEncryption::CreateBootLoaderInMemory (byte *buffer, size_t bufferSize, bool rescueDisk, bool hiddenOSCreation)
+	void BootEncryption::CreateBootLoaderInMemory (uint8 *buffer, size_t bufferSize, bool rescueDisk, bool hiddenOSCreation)
 	{
 		if (bufferSize < TC_BOOT_LOADER_AREA_SIZE - TC_BOOT_ENCRYPTION_VOLUME_HEADER_SIZE)
 			throw ParameterIncorrect (SRC_POS);
@@ -1671,29 +1702,30 @@ namespace VeraCrypt
 
 				if (_stricmp (request.BootEncryptionAlgorithmName, "AES") == 0)
 					ea = AES;
-				else if (_stricmp (request.BootEncryptionAlgorithmName, "Serpent") == 0)
+                        #ifndef WOLFCRYPT_BACKEND
+				else if (_stricmp (request.BootEncryptionAlgorithmName, "Camellia") == 0)
+					ea = CAMELLIA;	
+                                else if (_stricmp (request.BootEncryptionAlgorithmName, "Serpent") == 0)
 					ea = SERPENT;
 				else if (_stricmp (request.BootEncryptionAlgorithmName, "Twofish") == 0)
 					ea = TWOFISH;
-				else if (_stricmp (request.BootEncryptionAlgorithmName, "Camellia") == 0)
-					ea = CAMELLIA;
-#if defined(CIPHER_GOST89)
-				else if (_stricmp (request.BootEncryptionAlgorithmName, "GOST89") == 0)
-					ea = GOST89;
-#endif
-
+                        #endif
 				if (_stricmp(request.BootPrfAlgorithmName, "SHA-256") == 0)
 					pkcs5_prf = SHA256;
-				else if (_stricmp(request.BootPrfAlgorithmName, "RIPEMD-160") == 0)
-					pkcs5_prf = RIPEMD160;
-				else if (_stricmp(request.BootPrfAlgorithmName, "SHA-512") == 0)
+                              else if (_stricmp(request.BootPrfAlgorithmName, "SHA-512") == 0)
 					pkcs5_prf = SHA512;
+                        #ifndef WOLFCRYPT_BACKEND
+				else if (_stricmp(request.BootPrfAlgorithmName, "BLAKE2s-256") == 0)
+					pkcs5_prf = BLAKE2S;	
 				else if (_stricmp(request.BootPrfAlgorithmName, "Whirlpool") == 0)
 					pkcs5_prf = WHIRLPOOL;
 				else if (_stricmp(request.BootPrfAlgorithmName, "Streebog") == 0)
 					pkcs5_prf = STREEBOG;
+				else if (_stricmp(request.BootPrfAlgorithmName, "Argon2") == 0)
+					pkcs5_prf = ARGON2;
+                        #endif
 				else if (strlen(request.BootPrfAlgorithmName) == 0) // case of version < 1.0f
-					pkcs5_prf = RIPEMD160;
+					pkcs5_prf = BLAKE2S;
 			}
 			catch (...)
 			{
@@ -1719,8 +1751,12 @@ namespace VeraCrypt
 			pkcs5_prf = SelectedPrfAlgorithmId;
 		}
 
-		// Only RIPEMD160 and SHA-256 are supported for MBR boot loader		
-		if (!bIsGPT && pkcs5_prf != RIPEMD160 && pkcs5_prf != SHA256)
+		// Only BLAKE2s and SHA-256 are supported for MBR boot loader		
+		if (!bIsGPT && pkcs5_prf != BLAKE2S && pkcs5_prf != SHA256)
+			throw ParameterIncorrect (SRC_POS);
+
+		// we don't support Argon2 for system encryption for now
+		if (pkcs5_prf == ARGON2)
 			throw ParameterIncorrect (SRC_POS);
 
 		int bootSectorId = 0;
@@ -1794,7 +1830,7 @@ namespace VeraCrypt
 
 		// Boot sector
 		DWORD size;
-		byte *bootSecResourceImg = MapResource (L"BIN", bootSectorId, &size);
+		uint8 *bootSecResourceImg = MapResource (L"BIN", bootSectorId, &size);
 		if (!bootSecResourceImg || size != TC_SECTOR_SIZE_BIOS)
 			throw ParameterIncorrect (SRC_POS);
 
@@ -1802,8 +1838,7 @@ namespace VeraCrypt
 
 		*(uint16 *) (buffer + TC_BOOT_SECTOR_VERSION_OFFSET) = BE16 (VERSION_NUM);
 
-		if (IsOSAtLeast (WIN_VISTA))
-			buffer[TC_BOOT_SECTOR_CONFIG_OFFSET] |= TC_BOOT_CFG_FLAG_WINDOWS_VISTA_OR_LATER;
+		buffer[TC_BOOT_SECTOR_CONFIG_OFFSET] |= TC_BOOT_CFG_FLAG_WINDOWS_VISTA_OR_LATER;
 
 		if (rescueDisk && (ReadDriverConfigurationFlags() & TC_DRIVER_CONFIG_DISABLE_HARDWARE_ENCRYPTION))
 			buffer[TC_BOOT_SECTOR_CONFIG_OFFSET] |= TC_BOOT_CFG_FLAG_RESCUE_DISABLE_HW_ENCRYPTION;
@@ -1813,7 +1848,7 @@ namespace VeraCrypt
 		{
 			Device device (GetSystemDriveConfiguration().DevicePath);
 			device.CheckOpened (SRC_POS);
-			byte headerSector[TC_SECTOR_SIZE_BIOS];
+			uint8 headerSector[TC_SECTOR_SIZE_BIOS];
 
 			device.SeekAt (HiddenOSCandidatePartition.Info.StartingOffset.QuadPart + HiddenOSCandidatePartition.Info.PartitionLength.QuadPart - TC_VOLUME_HEADER_GROUP_SIZE + TC_VOLUME_HEADER_EFFECTIVE_SIZE);
 			device.Read (headerSector, sizeof (headerSector));
@@ -1822,14 +1857,14 @@ namespace VeraCrypt
 		}
 
 		// Decompressor
-		byte *decompressor = MapResource (L"BIN", IDR_BOOT_LOADER_DECOMPRESSOR, &size);
+		uint8 *decompressor = MapResource (L"BIN", IDR_BOOT_LOADER_DECOMPRESSOR, &size);
 		if (!decompressor || size > TC_BOOT_LOADER_DECOMPRESSOR_SECTOR_COUNT * TC_SECTOR_SIZE_BIOS)
 			throw ParameterIncorrect (SRC_POS);
 
 		memcpy (buffer + TC_SECTOR_SIZE_BIOS, decompressor, size);
 
 		// Compressed boot loader
-		byte *bootLoader = MapResource (L"BIN", bootLoaderId, &size);
+		uint8 *bootLoader = MapResource (L"BIN", bootLoaderId, &size);
 		if (!bootLoader || size > TC_MAX_BOOT_LOADER_SECTOR_COUNT * TC_SECTOR_SIZE_BIOS)
 			throw ParameterIncorrect (SRC_POS);
 
@@ -1855,7 +1890,7 @@ namespace VeraCrypt
 	}
 
 	// return false when the user cancel an elevation request
-	bool BootEncryption::ReadBootSectorConfig (byte *config, size_t bufLength, byte *userConfig, string *customUserMessage, uint16 *bootLoaderVersion)
+	bool BootEncryption::ReadBootSectorConfig (uint8 *config, size_t bufLength, uint8 *userConfig, string *customUserMessage, uint16 *bootLoaderVersion)
 	{
 		bool bCanceled = false, bExceptionOccured = false;
 		try
@@ -1948,11 +1983,11 @@ namespace VeraCrypt
 	}
 
 
-	void BootEncryption::WriteBootSectorConfig (const byte newConfig[])
+	void BootEncryption::WriteBootSectorConfig (const uint8 newConfig[])
 	{
 		Device device (GetSystemDriveConfiguration().DevicePath);
 		device.CheckOpened (SRC_POS);
-		byte mbr[TC_SECTOR_SIZE_BIOS];
+		uint8 mbr[TC_SECTOR_SIZE_BIOS];
 
 		device.SeekAt (0);
 		device.Read (mbr, sizeof (mbr));
@@ -1962,7 +1997,7 @@ namespace VeraCrypt
 		device.SeekAt (0);
 		device.Write (mbr, sizeof (mbr));
 
-		byte mbrVerificationBuf[TC_SECTOR_SIZE_BIOS];
+		uint8 mbrVerificationBuf[TC_SECTOR_SIZE_BIOS];
 		device.SeekAt (0);
 		device.Read (mbrVerificationBuf, sizeof (mbr));
 
@@ -1970,7 +2005,7 @@ namespace VeraCrypt
 			throw ErrorException ("ERROR_MBR_PROTECTED", SRC_POS);
 	}
 
-	void BootEncryption::WriteEfiBootSectorUserConfig (byte userConfig, const string &customUserMessage, int pim, int hashAlg)
+	void BootEncryption::WriteEfiBootSectorUserConfig (uint8 userConfig, const string &customUserMessage, int pim, int hashAlg)
 	{
 		if (!IsAdmin() && IsUacSupported())
 		{
@@ -1978,8 +2013,7 @@ namespace VeraCrypt
 		}
 		else
 		{
-			finally_do ({ EfiBootInst.DismountBootPartition(); });
-			EfiBootInst.MountBootPartition(0);
+			EfiBootInst.PrepareBootPartition();
 
 			if (! (userConfig & TC_BOOT_USER_CFG_FLAG_DISABLE_PIM))
 				pim = -1;
@@ -1990,7 +2024,7 @@ namespace VeraCrypt
 		}
 	}
 
-	void BootEncryption::WriteBootSectorUserConfig (byte userConfig, const string &customUserMessage, int pim, int hashAlg)
+	void BootEncryption::WriteBootSectorUserConfig (uint8 userConfig, const string &customUserMessage, int pim, int hashAlg)
 	{
 		if (GetSystemDriveConfiguration().SystemPartition.IsGPT)
 		{
@@ -2000,7 +2034,7 @@ namespace VeraCrypt
 		{
 			Device device (GetSystemDriveConfiguration().DevicePath);
 			device.CheckOpened (SRC_POS);
-			byte mbr[TC_SECTOR_SIZE_BIOS];
+			uint8 mbr[TC_SECTOR_SIZE_BIOS];
 
 			device.SeekAt (0);
 			device.Read (mbr, sizeof (mbr));
@@ -2035,7 +2069,7 @@ namespace VeraCrypt
 			device.SeekAt (0);
 			device.Write (mbr, sizeof (mbr));
 
-			byte mbrVerificationBuf[TC_SECTOR_SIZE_BIOS];
+			uint8 mbrVerificationBuf[TC_SECTOR_SIZE_BIOS];
 			device.SeekAt (0);
 			device.Read (mbrVerificationBuf, sizeof (mbr));
 
@@ -2047,7 +2081,7 @@ namespace VeraCrypt
 
 	unsigned int BootEncryption::GetHiddenOSCreationPhase ()
 	{
-		byte configFlags [TC_BOOT_CFG_FLAG_AREA_SIZE];
+		uint8 configFlags [TC_BOOT_CFG_FLAG_AREA_SIZE];
 
 		ReadBootSectorConfig (configFlags, sizeof(configFlags));
 
@@ -2060,11 +2094,11 @@ namespace VeraCrypt
 #if TC_BOOT_CFG_FLAG_AREA_SIZE != 1
 #	error TC_BOOT_CFG_FLAG_AREA_SIZE != 1; revise GetHiddenOSCreationPhase() and SetHiddenOSCreationPhase()
 #endif
-		byte configFlags [TC_BOOT_CFG_FLAG_AREA_SIZE];
+		uint8 configFlags [TC_BOOT_CFG_FLAG_AREA_SIZE];
 
 		ReadBootSectorConfig (configFlags, sizeof(configFlags));
 
-		configFlags[0] &= (byte) ~TC_BOOT_CFG_MASK_HIDDEN_OS_CREATION_PHASE;
+		configFlags[0] &= (uint8) ~TC_BOOT_CFG_MASK_HIDDEN_OS_CREATION_PHASE;
 
 		configFlags[0] |= newPhase;
 
@@ -2141,7 +2175,7 @@ namespace VeraCrypt
 
 		Device device (GetSystemDriveConfiguration().DevicePath);
 		device.CheckOpened(SRC_POS);
-		byte mbr[TC_SECTOR_SIZE_BIOS];
+		uint8 mbr[TC_SECTOR_SIZE_BIOS];
 
 		device.SeekAt (0);
 		device.Read (mbr, sizeof (mbr));
@@ -2158,7 +2192,7 @@ namespace VeraCrypt
 #	error PRAND_DISK_WIPE_PASSES > RNG_POOL_SIZE
 #endif
 
-		byte randData[PRAND_DISK_WIPE_PASSES];
+		uint8 randData[PRAND_DISK_WIPE_PASSES];
 		if (!RandgetBytes (ParentWindow, randData, sizeof (randData), FALSE))
 			throw ParameterIncorrect (SRC_POS);
 
@@ -2169,7 +2203,7 @@ namespace VeraCrypt
 				mbr[TC_BOOT_SECTOR_OUTER_VOLUME_BAK_HEADER_CRC_OFFSET + i] = randData[wipePass];
 			}
 
-			mbr[TC_BOOT_SECTOR_CONFIG_OFFSET] &= (byte) ~TC_BOOT_CFG_MASK_HIDDEN_OS_CREATION_PHASE;
+			mbr[TC_BOOT_SECTOR_CONFIG_OFFSET] &= (uint8) ~TC_BOOT_CFG_MASK_HIDDEN_OS_CREATION_PHASE;
 			mbr[TC_BOOT_SECTOR_CONFIG_OFFSET] |= randData[wipePass] & TC_BOOT_CFG_MASK_HIDDEN_OS_CREATION_PHASE;
 
 			if (wipePass == PRAND_DISK_WIPE_PASSES - 1)
@@ -2191,12 +2225,11 @@ namespace VeraCrypt
 
 #endif // !SETUP
 
-	NtQuerySystemInformationFn NtQuerySystemInformationPtr = NULL;
 
 	EfiBootConf::EfiBootConf() : passwordType (0),
 		passwordMsg ("Password: "),
 		passwordPicture ("login.bmp"),
-		hashMsg ("(0) TEST ALL (1) SHA512 (2) WHIRLPOOL (3) SHA256 (4) RIPEMD160 (5) STREEBOG\nHash: "),
+		hashMsg ("(0) TEST ALL (1) SHA512 (2) WHIRLPOOL (3) SHA256 (4) BLAKE2S (5) STREEBOG\nHash: "),
 		hashAlgo (0),
 		requestHash (0),
 		pimMsg ("PIM (Leave empty for default): "),
@@ -2313,7 +2346,7 @@ namespace VeraCrypt
 		passwordType = ReadConfigInteger (configContent, "PasswordType", 0);
 		passwordMsg = ReadConfigString (configContent, "PasswordMsg", "Password: ", buffer, sizeof (buffer));
 		passwordPicture = ReadConfigString (configContent, "PasswordPicture", "\\EFI\\VeraCrypt\\login.bmp", buffer, sizeof (buffer));
-		//hashMsg = ReadConfigString (configContent, "HashMsg", "(0) TEST ALL (1) SHA512 (2) WHIRLPOOL (3) SHA256 (4) RIPEMD160 (5) STREEBOG\nHash: ", buffer, sizeof (buffer));
+		//hashMsg = ReadConfigString (configContent, "HashMsg", "(0) TEST ALL (1) SHA512 (2) WHIRLPOOL (3) SHA256 (4) BLAKE2S (5) STREEBOG\nHash: ", buffer, sizeof (buffer));
 		hashAlgo = ReadConfigInteger (configContent, "Hash", 0);
 		requestHash = ReadConfigInteger (configContent, "HashRqt", 1);
 		pimMsg = ReadConfigString (configContent, "PimMsg", "PIM: ", buffer, sizeof (buffer));
@@ -2359,6 +2392,35 @@ namespace VeraCrypt
 		WriteConfigInteger (configFile, configContent, "AuthorizeRetry", authorizeRetry);
 		WriteConfigInteger (configFile, configContent, "DcsBmlLockFlags", bmlLockFlags);
 		WriteConfigInteger (configFile, configContent, "DcsBmlDriver", bmlDriverEnabled);
+
+		string fieldValue;
+		if (IsPostExecFileField(actionSuccessValue, fieldValue) && (0 == _stricmp(fieldValue.c_str(), "\\EFI\\Microsoft\\Boot\\bootmgfw.efi")))
+		{
+			// fix wrong configuration file since bootmgfw.efi is now a copy of VeraCrypt and if we don't fix the DcsProp
+			// file, veraCrypt bootloader will call itself
+			// We first check if bootmgfw.efi is original Microsoft one. If yes, we don't do anything, otherwise we set the field to bootmgfw_ms.vc
+			unsigned __int64 loaderSize = 0;
+			bool bModifiedMsBoot = true;
+			EfiBootInst.GetFileSize(L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi", loaderSize);
+
+			if (loaderSize > 32768)
+			{
+				std::vector<uint8> bootLoaderBuf ((size_t) loaderSize);
+
+				EfiBootInst.ReadFile(L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi", &bootLoaderBuf[0], (DWORD) loaderSize);
+
+				// look for bootmgfw.efi identifiant string
+				const char* g_szMsBootString = "bootmgfw.pdb";
+				if (BufferHasPattern (bootLoaderBuf.data (), (size_t) loaderSize, g_szMsBootString, strlen (g_szMsBootString)))
+				{
+					bModifiedMsBoot = false;
+				}
+			}
+
+			if (bModifiedMsBoot)
+				actionSuccessValue = "postexec file(EFI\\Microsoft\\Boot\\bootmgfw_ms.vc)";
+		}
+
 		WriteConfigString (configFile, configContent, "ActionSuccess", actionSuccessValue.c_str());
 
 		// Write unmodified values
@@ -2391,12 +2453,63 @@ namespace VeraCrypt
 		return bRet;
 	}
 
+	BOOL EfiBootConf::IsPostExecFileField (const string& fieldValue, string& filePath)
+	{
+		BOOL bRet = FALSE;
+		filePath = "";
+
+		if (!fieldValue.empty() && strlen (fieldValue.c_str()))
+		{
+			string  copieValue = fieldValue;
+			std::transform(copieValue.begin(), copieValue.end(), copieValue.begin(),
+				[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+			if (strstr (copieValue.c_str(), "postexec") && strstr (copieValue.c_str(), "file("))
+			{
+				char c;
+				const char* ptr = strstr (copieValue.c_str(), "file(");
+
+				filePath = "\\";
+				ptr += 5;
+				while ((c = *ptr))
+				{
+					if (c == ')')
+						break;
+					if (c == '/')
+						c = '\\';
+					filePath += c;
+					ptr++;
+				}
+
+				if (c == ')')
+					bRet = TRUE;									
+				else
+					filePath = "";
+			}
+		}
+
+		return bRet;
+	}
+
+	BOOL EfiBootConf::IsPostExecFileField (const string& fieldValue, wstring& filePath)
+	{
+		string aPath;
+		BOOL bRet = IsPostExecFileField (fieldValue, aPath);
+		if (bRet)
+			filePath = wstring(aPath.begin(), aPath.end());
+		else
+			filePath = L"";
+
+		return bRet;
+	}
+
 	static const wchar_t*	EfiVarGuid = L"{8BE4DF61-93CA-11D2-AA0D-00E098032B8C}";
 
 	void 
-	GetVolumeESP(wstring& path) 
+	GetVolumeESP(wstring& path, wstring& bootVolumePath) 
 	{
 		static wstring g_EspPath;
+		static wstring g_BootVolumePath;
 		static bool g_EspPathInitialized = false;
 
 		if (!g_EspPathInitialized)
@@ -2404,30 +2517,41 @@ namespace VeraCrypt
 			ULONG    len;
 			NTSTATUS res;
 			WCHAR tempBuf[1024];
+			NtQuerySystemInformationFn NtQuerySystemInformationPtr = (NtQuerySystemInformationFn) GetProcAddress (GetModuleHandle (L"ntdll.dll"), "NtQuerySystemInformation");
 			memset(tempBuf, 0, sizeof(tempBuf));
 
 			// Load NtQuerySystemInformation function point
 			if (!NtQuerySystemInformationPtr)
 			{
-				NtQuerySystemInformationPtr = (NtQuerySystemInformationFn) GetProcAddress (GetModuleHandle (L"ntdll.dll"), "NtQuerySystemInformation");
-				if (!NtQuerySystemInformationPtr)
-					throw SystemException (SRC_POS);
+				throw SystemException (SRC_POS);
 			}
 
 			res = NtQuerySystemInformationPtr((SYSTEM_INFORMATION_CLASS)SYSPARTITIONINFORMATION, tempBuf, sizeof(tempBuf), &len);
 			if (res != S_OK)
 			{
+				/* try to convert the returned NTSTATUS to a WIN32 system error using RtlNtStatusToDosError */
+				RtlNtStatusToDosErrorFn RtlNtStatusToDosErrorPtr = (RtlNtStatusToDosErrorFn) GetProcAddress (GetModuleHandle (L"ntdll.dll"), "RtlNtStatusToDosError");
+				if (RtlNtStatusToDosErrorPtr)
+				{
+					ULONG win32err = RtlNtStatusToDosErrorPtr (res);
+					if (win32err != ERROR_MR_MID_NOT_FOUND)
+						res = (NTSTATUS) win32err;
+				}
+
 				SetLastError (res);
 				throw SystemException (SRC_POS);
 			}		
 
 			PUNICODE_STRING pStr = (PUNICODE_STRING) tempBuf;
+
+			g_BootVolumePath = pStr->Buffer;
 			g_EspPath = L"\\\\?";
 			g_EspPath += &pStr->Buffer[7];
 			g_EspPathInitialized = true;
 		}
 
 		path = g_EspPath;
+		bootVolumePath = g_BootVolumePath;
 	}
 
 	std::string ReadESPFile (LPCWSTR szFilePath, bool bSkipUTF8BOM)
@@ -2437,9 +2561,9 @@ namespace VeraCrypt
 
 		ByteArray fileContent;
 		DWORD dwSize = 0, dwOffset = 0;
-		std::wstring pathESP;
+		std::wstring pathESP, bootVolumePath;
 
-		GetVolumeESP(pathESP);
+		GetVolumeESP(pathESP, bootVolumePath);
 		if (szFilePath[0] != L'\\')
 			pathESP += L"\\";
 		File f(pathESP + szFilePath, true);
@@ -2468,7 +2592,7 @@ namespace VeraCrypt
 
 		ByteArray fileContent;
 		DWORD dwSize = dwDataLen, dwOffset = 0;
-		std::wstring pathESP;
+		std::wstring pathESP, bootVolumePath;
 
 		if (bAddUTF8BOM)
 		{
@@ -2476,7 +2600,7 @@ namespace VeraCrypt
 			dwOffset = 3;
 		}
 
-		GetVolumeESP(pathESP);
+		GetVolumeESP(pathESP, bootVolumePath);
 		if (szFilePath[0] != L'\\')
 			pathESP += L"\\";
 
@@ -2492,63 +2616,19 @@ namespace VeraCrypt
 	}
 
 	EfiBoot::EfiBoot() {
-		ZeroMemory(EfiBootPartPath, sizeof(EfiBootPartPath));		
-		ZeroMemory (BootVolumePath, sizeof (BootVolumePath));
 		ZeroMemory (&sdn, sizeof (sdn));
 		ZeroMemory (&partInfo, sizeof (partInfo));
 		m_bMounted = false;
-		bBootVolumePathSelected = false;
+		bDeviceInfoValid = false;
 	}
 
-	void EfiBoot::SelectBootVolumeESP() {
-		NTSTATUS res;
-		ULONG    len;
-		memset(tempBuf, 0, sizeof(tempBuf));
+	void EfiBoot::PrepareBootPartition(bool bDisableException) {
+		
+		GetVolumeESP (EfiBootPartPath, BootVolumePath);
 
-		// Load NtQuerySystemInformation function point
-		if (!NtQuerySystemInformationPtr)
-		{
-			NtQuerySystemInformationPtr = (NtQuerySystemInformationFn) GetProcAddress (GetModuleHandle (L"ntdll.dll"), "NtQuerySystemInformation");
-			if (!NtQuerySystemInformationPtr)
-				throw SystemException (SRC_POS);
-		}
-
-		res = NtQuerySystemInformationPtr((SYSTEM_INFORMATION_CLASS)SYSPARTITIONINFORMATION, tempBuf, sizeof(tempBuf), &len);
-		if (res != S_OK)
-		{
-			SetLastError (res);
-			throw SystemException (SRC_POS);
-		}		
-
-		PUNICODE_STRING pStr = (PUNICODE_STRING) tempBuf;
-		memcpy (BootVolumePath, pStr->Buffer, min (pStr->Length, (sizeof (BootVolumePath) - 2)));
-		bBootVolumePathSelected = true;
-	}
-
-	void EfiBoot::SelectBootVolume(WCHAR* bootVolumePath) {
-		wstring str;
-		str = bootVolumePath;
-		memcpy (BootVolumePath, &str[0], min (str.length() * 2, (sizeof (BootVolumePath) - 2)));
-		bBootVolumePathSelected = true;
-	}
-
-	void EfiBoot::MountBootPartition(WCHAR letter) {
-		if (!bBootVolumePathSelected) {
-			SelectBootVolumeESP();
-		}
-
-		if (!letter) {
-			if (!GetFreeDriveLetter(&EfiBootPartPath[0])) {
-				throw ErrorException(L"No free letter to mount EFI boot partition", SRC_POS);
-			}
-		} else {
-			EfiBootPartPath[0] = letter;
-		}
-		EfiBootPartPath[1] = ':';
-		EfiBootPartPath[2] = 0;
-		throw_sys_if(!DefineDosDevice(DDD_RAW_TARGET_PATH, EfiBootPartPath, BootVolumePath));		
-
-		Device  dev(EfiBootPartPath, TRUE);
+		std::wstring devicePath = L"\\\\?\\GLOBALROOT";
+		devicePath += BootVolumePath;
+		Device  dev(devicePath.c_str(), TRUE);
 
 		try
 		{
@@ -2556,43 +2636,45 @@ namespace VeraCrypt
 		}
 		catch (...)
 		{
-			DefineDosDevice(DDD_REMOVE_DEFINITION, EfiBootPartPath, NULL);
-			throw;
+			if (!bDisableException)
+				throw;
 		}
 		
-		bool bSuccess = dev.IoCtl(IOCTL_STORAGE_GET_DEVICE_NUMBER, NULL, 0, &sdn, sizeof(sdn))
-							&& dev.IoCtl(IOCTL_DISK_GET_PARTITION_INFO_EX, NULL, 0, &partInfo, sizeof(partInfo));
-		DWORD dwLastError = GetLastError ();
-		dev.Close();
-		if (!bSuccess)
+		if (dev.IsOpened())
 		{
-			DefineDosDevice(DDD_REMOVE_DEFINITION, EfiBootPartPath, NULL);
-			SetLastError (dwLastError);
-			throw SystemException(SRC_POS);
-		}
-
-		m_bMounted = true;
-	}
-
-	void EfiBoot::DismountBootPartition() {
-		if (m_bMounted)
-		{
-			DefineDosDevice(DDD_REMOVE_DEFINITION, EfiBootPartPath, NULL);
-			m_bMounted = false;
+			bDeviceInfoValid = dev.IoCtl(IOCTL_STORAGE_GET_DEVICE_NUMBER, NULL, 0, &sdn, sizeof(sdn))
+								&& dev.IoCtl(IOCTL_DISK_GET_PARTITION_INFO_EX, NULL, 0, &partInfo, sizeof(partInfo));
+			DWORD dwLastError = GetLastError ();
+			dev.Close();
+			if (!bDeviceInfoValid && !bDisableException)
+			{
+				SetLastError (dwLastError);
+				throw SystemException(SRC_POS);
+			}		
 		}
 	}
 
 	bool EfiBoot::IsEfiBoot() {
 		DWORD BootOrderLen;
 		BootOrderLen = GetFirmwareEnvironmentVariable(L"BootOrder", EfiVarGuid, tempBuf, sizeof(tempBuf));
-		return BootOrderLen != 0;
+		return (BootOrderLen != 0) || (GetLastError() != ERROR_INVALID_FUNCTION);
 	}
 
 	void EfiBoot::DeleteStartExec(uint16 statrtOrderNum, wchar_t* type) {
-		SetPrivilege(SE_SYSTEM_ENVIRONMENT_NAME, TRUE);
+		DWORD dwLastError;
+		BOOL bPrivilegesSet = IsPrivilegeEnabled (SE_SYSTEM_ENVIRONMENT_NAME);
+		if (!bPrivilegesSet && !SetPrivilege(SE_SYSTEM_ENVIRONMENT_NAME, TRUE))
+		{
+			dwLastError = GetLastError();
+			wchar_t szMsg[128];
+			StringCchPrintfW(szMsg, ARRAYSIZE(szMsg), L"Failed to set SE_SYSTEM_ENVIRONMENT_NAME privilege (error code 0x%.8X)", dwLastError);
+			throw ErrorException(szMsg, SRC_POS);
+		}
 		// Check EFI
 		if (!IsEfiBoot()) {
-			throw ErrorException(L"can not detect EFI environment", SRC_POS);
+			if (!bPrivilegesSet)
+				SetPrivilege(SE_SYSTEM_ENVIRONMENT_NAME, FALSE);
+			throw ErrorException(L"Failed to detect EFI environment (error ERROR_INVALID_FUNCTION)", SRC_POS);
 		}
 		wchar_t	varName[256];
 		StringCchPrintfW(varName, ARRAYSIZE (varName), L"%s%04X", type == NULL ? L"Boot" : type, statrtOrderNum);
@@ -2635,100 +2717,122 @@ namespace VeraCrypt
 				SetFirmwareEnvironmentVariable(next.c_str(), EfiVarGuid, startOrder, 0);
 			}
 		}
+
+		if (!bPrivilegesSet)
+			SetPrivilege(SE_SYSTEM_ENVIRONMENT_NAME, FALSE);
 	}
 
-	void EfiBoot::SetStartExec(wstring description, wstring execPath, uint16 statrtOrderNum , wchar_t* type, uint32 attr) {
-		SetPrivilege(SE_SYSTEM_ENVIRONMENT_NAME, TRUE);
+	void EfiBoot::SetStartExec(wstring description, wstring execPath, bool setBootEntry, bool forceFirstBootEntry, bool setBootNext, uint16 statrtOrderNum , wchar_t* type, uint32 attr) {
+		DWORD dwLastError;
+		BOOL bPrivilegesSet = IsPrivilegeEnabled (SE_SYSTEM_ENVIRONMENT_NAME);
+		if (!bPrivilegesSet && !SetPrivilege(SE_SYSTEM_ENVIRONMENT_NAME, TRUE))
+		{
+			dwLastError = GetLastError();
+			wchar_t szMsg[128];
+			StringCchPrintfW(szMsg, ARRAYSIZE(szMsg), L"Failed to set SE_SYSTEM_ENVIRONMENT_NAME privilege (error code 0x%.8X)", dwLastError);
+			throw ErrorException(szMsg, SRC_POS);
+		}
 		// Check EFI
 		if (!IsEfiBoot()) {
-			throw ErrorException(L"can not detect EFI environment", SRC_POS);
+			if (!bPrivilegesSet)
+				SetPrivilege(SE_SYSTEM_ENVIRONMENT_NAME, FALSE);
+			throw ErrorException(L"Failed to detect EFI environment (error ERROR_INVALID_FUNCTION)", SRC_POS);
 		}
 		
-		uint32 varSize = 56;
-		varSize += ((uint32) description.length()) * 2 + 2;
-		varSize += ((uint32) execPath.length()) * 2 + 2;
-		byte *startVar = new byte[varSize];
-		byte *pVar = startVar;
+		if (bDeviceInfoValid)
+		{
+			uint32 varSize = 56;
+			varSize += ((uint32) description.length()) * 2 + 2;
+			varSize += ((uint32) execPath.length()) * 2 + 2;
+			uint8 *startVar = new uint8[varSize];
+			uint8 *pVar = startVar;
 
-		// Attributes (1b Active, 1000b - Hidden)
-		*(uint32 *)pVar = attr;
-		pVar += sizeof(uint32);
+			// Attributes (1b Active, 1000b - Hidden)
+			*(uint32 *)pVar = attr;
+			pVar += sizeof(uint32);
 
-		// Size Of device path + file path
-		*(uint16 *)pVar = (uint16)(50 + execPath.length() * 2 + 2);
-		pVar += sizeof(uint16);
-
-		// description
-		for (uint32 i = 0; i < description.length(); i++) {
-			*(uint16 *)pVar = description[i];
+			// Size Of device path + file path
+			*(uint16 *)pVar = (uint16)(50 + execPath.length() * 2 + 2);
 			pVar += sizeof(uint16);
-		}
-		*(uint16 *)pVar = 0;
-		pVar += sizeof(uint16);
 
-		/* EFI_DEVICE_PATH_PROTOCOL (HARDDRIVE_DEVICE_PATH \ FILE_PATH \ END) */
+			// description
+			for (uint32 i = 0; i < description.length(); i++) {
+				*(uint16 *)pVar = description[i];
+				pVar += sizeof(uint16);
+			}
+			*(uint16 *)pVar = 0;
+			pVar += sizeof(uint16);
 
-		// Type
-		*(byte *)pVar = 0x04;
-		pVar += sizeof(byte);
+			/* EFI_DEVICE_PATH_PROTOCOL (HARDDRIVE_DEVICE_PATH \ FILE_PATH \ END) */
 
-		// SubType
-		*(byte *)pVar = 0x01;
-		pVar += sizeof(byte);
+			// Type
+			*(uint8 *)pVar = 0x04;
+			pVar += sizeof(uint8);
 
-		// HDD dev path length
-		*(uint16 *)pVar = 0x2A; // 42
-		pVar += sizeof(uint16);
+			// SubType
+			*(uint8 *)pVar = 0x01;
+			pVar += sizeof(uint8);
+
+			// HDD dev path length
+			*(uint16 *)pVar = 0x2A; // 42
+			pVar += sizeof(uint16);
 		
-		// PartitionNumber
-		*(uint32 *)pVar = (uint32)partInfo.PartitionNumber;
-		pVar += sizeof(uint32);
+			// PartitionNumber
+			*(uint32 *)pVar = (uint32)partInfo.PartitionNumber;
+			pVar += sizeof(uint32);
 
-		// PartitionStart
-		*(uint64 *)pVar = partInfo.StartingOffset.QuadPart >> 9;
-		pVar += sizeof(uint64);
+			// PartitionStart
+			*(uint64 *)pVar = partInfo.StartingOffset.QuadPart >> 9;
+			pVar += sizeof(uint64);
 
-		// PartitiontSize
-		*(uint64 *)pVar = partInfo.PartitionLength.QuadPart >> 9;
-		pVar += sizeof(uint64);
+			// PartitiontSize
+			*(uint64 *)pVar = partInfo.PartitionLength.QuadPart >> 9;
+			pVar += sizeof(uint64);
 
-		// GptGuid
-		memcpy(pVar, &partInfo.Gpt.PartitionId, 16);
-		pVar += 16;
+			// GptGuid
+			memcpy(pVar, &partInfo.Gpt.PartitionId, 16);
+			pVar += 16;
 
-		// MbrType
-		*(byte *)pVar = 0x02;
-		pVar += sizeof(byte);
+			// MbrType
+			*(uint8 *)pVar = 0x02;
+			pVar += sizeof(uint8);
 
-		// SigType
-		*(byte *)pVar = 0x02;
-		pVar += sizeof(byte);
+			// SigType
+			*(uint8 *)pVar = 0x02;
+			pVar += sizeof(uint8);
 
-		// Type and sub type 04 04 (file path)
-		*(uint16 *)pVar = 0x0404;
-		pVar += sizeof(uint16);
-
-		// SizeOfFilePath ((CHAR16)FullPath.length + sizeof(EndOfrecord marker) )
-		*(uint16 *)pVar = (uint16)(execPath.length() * 2 + 2 + sizeof(uint32));
-		pVar += sizeof(uint16);
-
-		// FilePath
-		for (uint32 i = 0; i < execPath.length(); i++) {
-			*(uint16 *)pVar = execPath[i];
+			// Type and sub type 04 04 (file path)
+			*(uint16 *)pVar = 0x0404;
 			pVar += sizeof(uint16);
+
+			// SizeOfFilePath ((CHAR16)FullPath.length + sizeof(EndOfrecord marker) )
+			*(uint16 *)pVar = (uint16)(execPath.length() * 2 + 2 + sizeof(uint32));
+			pVar += sizeof(uint16);
+
+			// FilePath
+			for (uint32 i = 0; i < execPath.length(); i++) {
+				*(uint16 *)pVar = execPath[i];
+				pVar += sizeof(uint16);
+			}
+			*(uint16 *)pVar = 0;
+			pVar += sizeof(uint16);
+
+			// EndOfrecord
+			*(uint32 *)pVar = 0x04ff7f;
+			pVar += sizeof(uint32);
+
+			// Set variable
+			wchar_t	varName[256];
+			StringCchPrintfW(varName, ARRAYSIZE (varName), L"%s%04X", type == NULL ? L"Boot" : type, statrtOrderNum);
+
+			// only set value if it doesn't already exist
+			uint8* existingVar = new uint8[varSize];
+			DWORD existingVarLen = GetFirmwareEnvironmentVariableW (varName, EfiVarGuid, existingVar, varSize);
+			if ((existingVarLen != varSize) || (0 != memcmp (existingVar, startVar, varSize)))
+				SetFirmwareEnvironmentVariable(varName, EfiVarGuid, startVar, varSize);
+			delete [] startVar;
+			delete [] existingVar;
 		}
-		*(uint16 *)pVar = 0;
-		pVar += sizeof(uint16);
-
-		// EndOfrecord
-		*(uint32 *)pVar = 0x04ff7f;
-		pVar += sizeof(uint32);
-
-		// Set variable
-		wchar_t	varName[256];
-		StringCchPrintfW(varName, ARRAYSIZE (varName), L"%s%04X", type == NULL ? L"Boot" : type, statrtOrderNum);
-		SetFirmwareEnvironmentVariable(varName, EfiVarGuid, startVar, varSize);
-		delete [] startVar;
 
 		// Update order
 		wstring order = L"Order";
@@ -2745,42 +2849,186 @@ namespace VeraCrypt
 			}
 		}
 
-		// Create new entry if absent
-		if (startOrderNumPos == UINT_MAX) {
-			for (uint32 i = startOrderLen / 2; i > 0; --i) {
-				startOrder[i] = startOrder[i - 1];
+		if (setBootEntry)
+		{
+			// check if first entry in BootOrder is Windows one
+			bool bFirstEntryIsWindows = false;
+			if (startOrderNumPos != 0)
+			{
+				wchar_t	varName[256];
+				StringCchPrintfW(varName, ARRAYSIZE (varName), L"%s%04X", type == NULL ? L"Boot" : type, startOrder[0]);
+
+				uint8* existingVar = new uint8[512];
+				DWORD existingVarLen = GetFirmwareEnvironmentVariableW (varName, EfiVarGuid, existingVar, 512);
+				if (existingVarLen > 0)
+				{
+					if (BufferContainsWideString (existingVar, existingVarLen, L"EFI\\Microsoft\\Boot\\bootmgfw.efi"))
+						bFirstEntryIsWindows = true;
+				}
+
+				delete [] existingVar;
 			}
-			startOrder[0] = statrtOrderNum;
-			startOrderLen += 2;
-			startOrderUpdate = true;
-		} else if (startOrderNumPos > 0) {
-			for (uint32 i = startOrderNumPos; i > 0; --i) {
-				startOrder[i] = startOrder[i - 1];
+
+
+			// Create new entry if absent
+			if (startOrderNumPos == UINT_MAX) {
+				if (bDeviceInfoValid)
+				{
+					if (forceFirstBootEntry && bFirstEntryIsWindows)
+					{
+						for (uint32 i = startOrderLen / 2; i > 0; --i) {
+							startOrder[i] = startOrder[i - 1];
+						}
+						startOrder[0] = statrtOrderNum;
+					}
+					else
+					{
+						startOrder[startOrderLen/2] = statrtOrderNum;
+					}
+					startOrderLen += 2;
+					startOrderUpdate = true;
+				}
+			} else if ((startOrderNumPos > 0) && forceFirstBootEntry && bFirstEntryIsWindows) {
+				for (uint32 i = startOrderNumPos; i > 0; --i) {
+					startOrder[i] = startOrder[i - 1];
+				}
+				startOrder[0] = statrtOrderNum;
+				startOrderUpdate = true;
 			}
-			startOrder[0] = statrtOrderNum;
-			startOrderUpdate = true;
+
+			if (startOrderUpdate) {
+				SetFirmwareEnvironmentVariable(order.c_str(), EfiVarGuid, startOrder, startOrderLen);
+			}
 		}
 
-		if (startOrderUpdate) {
-			SetFirmwareEnvironmentVariable(order.c_str(), EfiVarGuid, startOrder, startOrderLen);
+		if (setBootNext)
+		{
+			// set BootNext value
+			wstring next = L"Next";
+			next.insert(0, type == NULL ? L"Boot" : type);
+
+			SetFirmwareEnvironmentVariable(next.c_str(), EfiVarGuid, &statrtOrderNum, 2);
+
 		}
 
-		// set BootNext value
-		wstring next = L"Next";
-		next.insert(0, type == NULL ? L"Boot" : type);
-
-		SetFirmwareEnvironmentVariable(next.c_str(), EfiVarGuid, &statrtOrderNum, 2);
-
+		if (!bPrivilegesSet)
+			SetPrivilege(SE_SYSTEM_ENVIRONMENT_NAME, FALSE);
 	}
 
-	void EfiBoot::SaveFile(const wchar_t* name, byte* data, DWORD size) {
+	bool EfiBoot::CompareFiles (const wchar_t* fileName1, const wchar_t* fileName2)
+	{
+		bool bRet = false;
+		File f1 (fileName1, true);
+		File f2 (fileName2, true);
+
+		if (f1.IsOpened() && f2.IsOpened())
+		{
+			try
+			{
+				DWORD size1, size2;
+				f1.GetFileSize (size1);
+				f2.GetFileSize (size2);
+
+				if (size1 == size2)
+				{
+					// same size, so now we compare content
+					std::vector<uint8> file1Buf (8096);
+					std::vector<uint8> file2Buf (8096);
+					DWORD remainingBytes = size1, dataToRead;
+
+					while (remainingBytes)
+					{
+						dataToRead = VC_MIN (remainingBytes, (DWORD) file1Buf.size());
+						DWORD f1Bytes = f1.Read (file1Buf.data(), dataToRead);
+						DWORD f2Bytes = f2.Read (file2Buf.data(), dataToRead);
+
+						if ((f1Bytes != f2Bytes) || memcmp (file1Buf.data(), file2Buf.data(), (size_t) f1Bytes))
+						{
+							break;
+						}
+						else
+						{
+							remainingBytes -= f1Bytes;
+						}
+					}
+
+					if (0 == remainingBytes)
+					{
+						// content is the same
+						bRet = true;
+					}
+				}
+			}
+			catch (...) {}
+		}
+
+		f1.Close();
+		f2.Close();
+
+		return bRet;
+	}
+
+	bool EfiBoot::CompareFileData (const wchar_t* fileName, const uint8* data, DWORD size)
+	{
+		bool bRet = false;
+
+		File f(fileName, true);
+		if (f.IsOpened ())
+		{
+			try
+			{
+				// check if the file has the same content
+				// if yes, don't perform any write operation to avoid changing its timestamp
+				DWORD existingSize = 0;
+
+				f.GetFileSize(existingSize);				
+				
+				if (existingSize == size)
+				{
+					std::vector<uint8> fileBuf (8096);
+					DWORD remainingBytes = size, dataOffset = 0, dataToRead;
+
+					while (remainingBytes)
+					{
+						dataToRead = VC_MIN (remainingBytes, (DWORD) fileBuf.size());
+						dataToRead = f.Read (fileBuf.data(), dataToRead);
+
+						if (memcmp (data + dataOffset, fileBuf.data(), (size_t) dataToRead))
+						{
+							break;
+						}
+						else
+						{
+							dataOffset += dataToRead;
+							remainingBytes -= dataToRead;
+						}
+					}
+
+					if (0 == remainingBytes)
+					{
+						// content is the same
+						bRet = true;
+					}
+				}			
+			}
+			catch (...){}
+		}
+		
+		f.Close();
+
+		return bRet;
+	}
+
+	void EfiBoot::SaveFile(const wchar_t* name, uint8* data, DWORD size) {
 		wstring path = EfiBootPartPath;
 		path += name;
 
-		File f(path, false, true);
-		f.Write(data, size);
-		f.Close();
-
+		if (!CompareFileData (path.c_str(), data, size))
+		{
+			File f(path, false, true);
+			f.Write(data, size);
+			f.Close();
+		}
 	}
 
 	bool EfiBoot::FileExists(const wchar_t* name) {
@@ -2800,7 +3048,7 @@ namespace VeraCrypt
 		f.Close();
 	}
 
-	void EfiBoot::ReadFile(const wchar_t* name, byte* data, DWORD size) {
+	void EfiBoot::ReadFile(const wchar_t* name, uint8* data, DWORD size) {
 		wstring path = EfiBootPartPath;
 		path += name;
 		File f(path, true);
@@ -2819,15 +3067,27 @@ namespace VeraCrypt
 		}
 		else
 			targetPath = targetName;
-		throw_sys_if (!::CopyFileW (path.c_str(), targetPath.c_str(), FALSE));
+
+		// if both files are the same, we don't perform copy operation
+		if (!CompareFiles (path.c_str(), targetPath.c_str()))
+			throw_sys_if (!::CopyFileW (path.c_str(), targetPath.c_str(), FALSE));
 	}
 
-	BOOL EfiBoot::RenameFile(const wchar_t* name, wchar_t* nameNew, BOOL bForce) {
+	BOOL EfiBoot::RenameFile(const wchar_t* name, const wchar_t* nameNew, BOOL bForce) {
 		wstring path = EfiBootPartPath;
 		path += name;
 		wstring pathNew = EfiBootPartPath;
 		pathNew += nameNew;
-		return MoveFileExW(path.c_str(), pathNew.c_str(), bForce? MOVEFILE_REPLACE_EXISTING : 0);
+		
+		BOOL bRet;
+		if (CompareFiles (path.c_str(), pathNew.c_str()))
+		{
+			// files identical. Delete source file only
+			bRet = DeleteFile (path.c_str());
+		}
+		else
+			bRet = MoveFileExW(path.c_str(), pathNew.c_str(), bForce? MOVEFILE_REPLACE_EXISTING : 0);
+		return bRet;
 	}
 
 	BOOL EfiBoot::DelFile(const wchar_t* name) {
@@ -2954,7 +3214,7 @@ namespace VeraCrypt
 	void BootEncryption::UpdateSetupConfigFile (bool bForInstall)
 	{
 		// starting from Windows 10 1607 (Build 14393), ReflectDrivers in Setupconfig.ini is supported
-		if (IsOSVersionAtLeast (WIN_10, 0) && CurrentOSBuildNumber >= 14393)
+		if (IsWin10BuildAtLeast(WIN_10_1607_BUILD))
 		{
 			wchar_t szInstallPath [TC_MAX_PATH];
 			wchar_t szSetupconfigLocation [TC_MAX_PATH + 20];
@@ -2977,20 +3237,69 @@ namespace VeraCrypt
 
 				if (bForInstall)
 				{
+					/* Before updating files, we check first if they already have the expected content. If yes, then we don't perform
+					 * any write operation to avoid modifying file timestamps Unnecessarily.
+					 */
+					bool bSkipWrite = false;
+					wchar_t wszBuffer [2 * TC_MAX_PATH] = {0};
 					wstring szPathParam = L"\"";
 					szPathParam += szInstallPath;
 					szPathParam += L"\"";
-					WritePrivateProfileStringW (L"SetupConfig", L"ReflectDrivers", szPathParam.c_str(), szSetupconfigLocation);
 
+					if (	(0 < GetPrivateProfileStringW (L"SetupConfig", L"ReflectDrivers", L"", wszBuffer, ARRAYSIZE (wszBuffer), szSetupconfigLocation))
+						&&	(_wcsicmp (wszBuffer, szInstallPath) == 0)
+						)
+					{
+						bSkipWrite = true;
+					}
+
+					if (!bSkipWrite)
+						WritePrivateProfileStringW (L"SetupConfig", L"ReflectDrivers", szPathParam.c_str(), szSetupconfigLocation);
+
+					bSkipWrite = false;
 					szPathParam = GetProgramConfigPath (L"SetupComplete.cmd");
-					FILE* scriptFile = _wfopen (szPathParam.c_str(), L"w");
+
+					wstring wszExpectedValue = L"\"";
+					wszExpectedValue += szInstallPath;
+					wszExpectedValue += L"\\VeraCrypt.exe\" /PostOOBE";
+
+					FILE* scriptFile = _wfopen (szPathParam.c_str(), L"r");
 					if (scriptFile)
 					{
-						fwprintf (scriptFile, L"\"%s\\VeraCrypt.exe\" /PostOOBE\n", szInstallPath);
-						fclose (scriptFile);
+						long fileSize = _filelength (_fileno (scriptFile));
+						if (fileSize < (2 * TC_MAX_PATH))
+						{
+							fgetws (wszBuffer, ARRAYSIZE (wszBuffer), scriptFile);
 
-						WritePrivateProfileStringW (L"SetupConfig", L"PostOOBE", szPathParam.c_str(), szSetupconfigLocation);
+							if (wszBuffer[wcslen (wszBuffer) - 1] == L'\n')
+								wszBuffer[wcslen (wszBuffer) - 1] = 0;
+
+							bSkipWrite = (0 == _wcsicmp (wszBuffer, wszExpectedValue.c_str()));
+						}
+						fclose (scriptFile);
 					}
+
+					if (!bSkipWrite)
+					{
+						scriptFile = _wfopen (szPathParam.c_str(), L"w");
+						if (scriptFile)
+						{
+							fwprintf (scriptFile, L"%s\n", wszExpectedValue.c_str());
+							fclose (scriptFile);
+						}
+					}
+
+					bSkipWrite = false;
+
+					if (	(0 < GetPrivateProfileStringW (L"SetupConfig", L"PostOOBE", L"", wszBuffer, ARRAYSIZE (wszBuffer), szSetupconfigLocation))
+						&&	(_wcsicmp (wszBuffer, szPathParam.c_str()) == 0)
+						)
+					{
+						bSkipWrite = true;
+					}
+
+					if (!bSkipWrite)
+						WritePrivateProfileStringW (L"SetupConfig", L"PostOOBE", szPathParam.c_str(), szSetupconfigLocation);
 				}
 				else
 				{
@@ -3035,76 +3344,60 @@ namespace VeraCrypt
 				}
 			}
 			DWORD sizeDcsBoot;
-#ifdef _WIN64
-			byte *dcsBootImg = MapResource(L"BIN", IDR_EFI_DCSBOOT, &sizeDcsBoot);
-#else
-			byte *dcsBootImg = MapResource(L"BIN", Is64BitOs()? IDR_EFI_DCSBOOT : IDR_EFI_DCSBOOT32, &sizeDcsBoot);
-#endif
+			uint8 *dcsBootImg = MapResource(L"BIN", IDR_EFI_DCSBOOT, &sizeDcsBoot);
 			if (!dcsBootImg)
 				throw ErrorException(L"Out of resource DcsBoot", SRC_POS);
 			DWORD sizeDcsInt;
-#ifdef _WIN64
-			byte *dcsIntImg = MapResource(L"BIN", IDR_EFI_DCSINT, &sizeDcsInt);
-#else
-			byte *dcsIntImg = MapResource(L"BIN", Is64BitOs()? IDR_EFI_DCSINT: IDR_EFI_DCSINT32, &sizeDcsInt);
-#endif
+			uint8 *dcsIntImg = MapResource(L"BIN", IDR_EFI_DCSINT, &sizeDcsInt);
 			if (!dcsIntImg)
 				throw ErrorException(L"Out of resource DcsInt", SRC_POS);
 			DWORD sizeDcsCfg;
-#ifdef _WIN64
-			byte *dcsCfgImg = MapResource(L"BIN", IDR_EFI_DCSCFG, &sizeDcsCfg);
-#else
-			byte *dcsCfgImg = MapResource(L"BIN", Is64BitOs()? IDR_EFI_DCSCFG: IDR_EFI_DCSCFG32, &sizeDcsCfg);
-#endif
+			uint8 *dcsCfgImg = MapResource(L"BIN", IDR_EFI_DCSCFG, &sizeDcsCfg);
 			if (!dcsCfgImg)
 				throw ErrorException(L"Out of resource DcsCfg", SRC_POS);
 			DWORD sizeLegacySpeaker;
-#ifdef _WIN64
-			byte *LegacySpeakerImg = MapResource(L"BIN", IDR_EFI_LEGACYSPEAKER, &sizeLegacySpeaker);
-#else
-			byte *LegacySpeakerImg = MapResource(L"BIN", Is64BitOs()? IDR_EFI_LEGACYSPEAKER: IDR_EFI_LEGACYSPEAKER32, &sizeLegacySpeaker);
-#endif
+			uint8 *LegacySpeakerImg = MapResource(L"BIN", IDR_EFI_LEGACYSPEAKER, &sizeLegacySpeaker);
 			if (!LegacySpeakerImg)
 				throw ErrorException(L"Out of resource LegacySpeaker", SRC_POS);
 #ifdef VC_EFI_CUSTOM_MODE
 			DWORD sizeBootMenuLocker;
-#ifdef _WIN64
-			byte *BootMenuLockerImg = MapResource(L"BIN", IDR_EFI_DCSBML, &sizeBootMenuLocker);
-#else
-			byte *BootMenuLockerImg = MapResource(L"BIN", Is64BitOs()? IDR_EFI_DCSBML: IDR_EFI_DCSBML32, &sizeBootMenuLocker);
-#endif
+			uint8 *BootMenuLockerImg = MapResource(L"BIN", IDR_EFI_DCSBML, &sizeBootMenuLocker);
 			if (!BootMenuLockerImg)
 				throw ErrorException(L"Out of resource DcsBml", SRC_POS);
 #endif
 			DWORD sizeDcsInfo;
-#ifdef _WIN64
-			byte *DcsInfoImg = MapResource(L"BIN", IDR_EFI_DCSINFO, &sizeDcsInfo);
-#else
-			byte *DcsInfoImg = MapResource(L"BIN", Is64BitOs()? IDR_EFI_DCSINFO: IDR_EFI_DCSINFO32, &sizeDcsInfo);
-#endif
+			uint8 *DcsInfoImg = MapResource(L"BIN", IDR_EFI_DCSINFO, &sizeDcsInfo);
 			if (!DcsInfoImg)
 				throw ErrorException(L"Out of resource DcsInfo", SRC_POS);
 
-			finally_do ({ EfiBootInst.DismountBootPartition(); });
-			EfiBootInst.MountBootPartition(0);			
+			EfiBootInst.PrepareBootPartition(PostOOBEMode);			
 
 			try
 			{
 				// Save modules
 				bool bAlreadyExist;
+				const char* g_szMsBootString = "bootmgfw.pdb";
+				unsigned __int64 loaderSize = 0;
+				const wchar_t * szStdEfiBootloader = L"\\EFI\\Boot\\bootx64.efi";
+				const wchar_t * szBackupEfiBootloader = L"\\EFI\\Boot\\original_bootx64.vc_backup";
 
 				if (preserveUserConfig)
 				{
-					bool bModifiedMsBoot = true;
-					const char* g_szMsBootString = "bootmgfw.pdb";
-					unsigned __int64 loaderSize = 0;
-					EfiBootInst.GetFileSize(L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi", loaderSize);
+					bool bModifiedMsBoot = true, bMissingMsBoot = false;;
+					if (EfiBootInst.FileExists (L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi"))
+						EfiBootInst.GetFileSize(L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi", loaderSize);
+					else
+						bMissingMsBoot = true;
+
+					// restore boot menu entry in case of PostOOBE
+					if (PostOOBEMode)
+						EfiBootInst.SetStartExec(L"VeraCrypt BootLoader (DcsBoot)", L"\\EFI\\VeraCrypt\\DcsBoot.efi", SetBootEntry, ForceFirstBootEntry, SetBootNext);
 
 					if (EfiBootInst.FileExists (L"\\EFI\\Microsoft\\Boot\\bootmgfw_ms.vc"))
 					{
 						if (loaderSize > 32768)
 						{
-							std::vector<byte> bootLoaderBuf ((size_t) loaderSize);
+							std::vector<uint8> bootLoaderBuf ((size_t) loaderSize);
 
 							EfiBootInst.ReadFile(L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi", &bootLoaderBuf[0], (DWORD) loaderSize);
 
@@ -3122,7 +3415,7 @@ namespace VeraCrypt
 						// DcsBoot.efi is always smaller than 32KB
 						if (loaderSize > 32768)
 						{
-							std::vector<byte> bootLoaderBuf ((size_t) loaderSize);
+							std::vector<uint8> bootLoaderBuf ((size_t) loaderSize);
 
 							EfiBootInst.ReadFile(L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi", &bootLoaderBuf[0], (DWORD) loaderSize);
 
@@ -3141,43 +3434,64 @@ namespace VeraCrypt
 							EfiBootConf conf;
 							if (EfiBootInst.ReadConfig (L"\\EFI\\VeraCrypt\\DcsProp", conf) && strlen (conf.actionSuccessValue.c_str()))
 							{
-								string actionValue = conf.actionSuccessValue;
-								std::transform(actionValue.begin(), actionValue.end(), actionValue.begin(), ::tolower);
-
-								if (strstr (actionValue.c_str(), "postexec") && strstr (actionValue.c_str(), "file("))
+								wstring loaderPath;
+								if (EfiBootConf::IsPostExecFileField (conf.actionSuccessValue, loaderPath))
 								{
-									char c;
-									const char* ptr = strstr (actionValue.c_str(), "file(");
-									ptr += 5;
-									wstring loaderPath = L"\\";
-									while ((c = *ptr))
+									// check that it is not bootmgfw.efi
+									if (	(0 != _wcsicmp (loaderPath.c_str(), L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi"))
+										&&	(EfiBootInst.FileExists (loaderPath.c_str()))
+										)
 									{
-										if (c == ')' || c == ' ')
-											break;
-										loaderPath += (wchar_t) c;
-										ptr++;
+										// look for bootmgfw.efi identifiant string
+										EfiBootInst.GetFileSize(loaderPath.c_str(), loaderSize);
+										std::vector<uint8> bootLoaderBuf ((size_t) loaderSize);
+
+										EfiBootInst.ReadFile(loaderPath.c_str(), &bootLoaderBuf[0], (DWORD) loaderSize);
+
+										// look for bootmgfw.efi identifiant string
+										if (BufferHasPattern (bootLoaderBuf.data (), (size_t) loaderSize, g_szMsBootString, strlen (g_szMsBootString)))
+										{
+											bFound = true;
+											EfiBootInst.RenameFile(loaderPath.c_str(), L"\\EFI\\Microsoft\\Boot\\bootmgfw_ms.vc", TRUE);
+										}
 									}
-									bFound = true;
-									EfiBootInst.RenameFile(loaderPath.c_str(), L"\\EFI\\Microsoft\\Boot\\bootmgfw_ms.vc", TRUE);
 								}
 							}
 
-							if (!bFound)
+							if (!bFound && !PostOOBEMode)
 								throw ErrorException ("WINDOWS_EFI_BOOT_LOADER_MISSING", SRC_POS);
 						}
 					}
 
-					if (PostOOBEMode)
-					{
+					if (PostOOBEMode && EfiBootInst.FileExists (L"\\EFI\\VeraCrypt\\DcsBoot.efi"))
+					{						
 						// check if bootmgfw.efi has been set again to Microsoft version
 						// if yes, replace it with our bootloader after it was copied to bootmgfw_ms.vc
-						if (!bModifiedMsBoot)
+						if (!bModifiedMsBoot || bMissingMsBoot)
 							EfiBootInst.CopyFile (L"\\EFI\\VeraCrypt\\DcsBoot.efi", L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi");
+
+						if (EfiBootInst.FileExists (szStdEfiBootloader))
+						{
+							// check if standard bootloader under EFI\Boot has been set to Microsoft version
+							// if yes, replace it with our bootloader
+							EfiBootInst.GetFileSize(szStdEfiBootloader, loaderSize);
+							if (loaderSize > 32768)
+							{
+								std::vector<uint8> bootLoaderBuf ((size_t) loaderSize);
+
+								EfiBootInst.ReadFile(szStdEfiBootloader, &bootLoaderBuf[0], (DWORD) loaderSize);
+
+								// look for bootmgfw.efi identifiant string
+								if (BufferHasPattern (bootLoaderBuf.data (), (size_t) loaderSize, g_szMsBootString, strlen (g_szMsBootString)))
+								{
+									EfiBootInst.RenameFile (szStdEfiBootloader, szBackupEfiBootloader, TRUE);
+									EfiBootInst.CopyFile (L"\\EFI\\VeraCrypt\\DcsBoot.efi", szStdEfiBootloader);
+								}
+							}
+						}
 						return;
 					}
 				}
-
-				const wchar_t * szStdEfiBootloader = Is64BitOs()? L"\\EFI\\Boot\\bootx64.efi": L"\\EFI\\Boot\\bootia32.efi";
 
 				EfiBootInst.MkDir(L"\\EFI\\VeraCrypt", bAlreadyExist);
 				EfiBootInst.SaveFile(L"\\EFI\\VeraCrypt\\DcsBoot.efi", dcsBootImg, sizeDcsBoot);
@@ -3190,10 +3504,29 @@ namespace VeraCrypt
 				EfiBootInst.SaveFile(L"\\EFI\\VeraCrypt\\DcsInfo.dcs", DcsInfoImg, sizeDcsInfo);
 				if (!preserveUserConfig)
 					EfiBootInst.DelFile(L"\\EFI\\VeraCrypt\\PlatformInfo");
-				EfiBootInst.SetStartExec(L"VeraCrypt BootLoader (DcsBoot)", L"\\EFI\\VeraCrypt\\DcsBoot.efi");
+				EfiBootInst.SetStartExec(L"VeraCrypt BootLoader (DcsBoot)", L"\\EFI\\VeraCrypt\\DcsBoot.efi", SetBootEntry, ForceFirstBootEntry, SetBootNext);
 
 				if (EfiBootInst.FileExists (szStdEfiBootloader))
-					EfiBootInst.SaveFile(szStdEfiBootloader, dcsBootImg, sizeDcsBoot);
+				{
+					// check if standard bootloader under EFI\Boot is Microsoft one or if it is ours
+					// if both cases, replace it with our bootloader otherwise do nothing
+					EfiBootInst.GetFileSize(szStdEfiBootloader, loaderSize);
+					std::vector<uint8> bootLoaderBuf ((size_t) loaderSize);
+					EfiBootInst.ReadFile(szStdEfiBootloader, &bootLoaderBuf[0], (DWORD) loaderSize);
+
+					// look for bootmgfw.efi or VeraCrypt identifiant strings
+					if (	((loaderSize > 32768) && BufferHasPattern (bootLoaderBuf.data (), (size_t) loaderSize, g_szMsBootString, strlen (g_szMsBootString)))
+						)
+					{
+						EfiBootInst.RenameFile (szStdEfiBootloader, szBackupEfiBootloader, TRUE);
+						EfiBootInst.SaveFile(szStdEfiBootloader, dcsBootImg, sizeDcsBoot);
+					}
+					if (	((loaderSize <= 32768) && BufferHasPattern (bootLoaderBuf.data (), (size_t) loaderSize, _T(TC_APP_NAME), strlen (TC_APP_NAME) * 2))
+						)
+					{
+						EfiBootInst.SaveFile(szStdEfiBootloader, dcsBootImg, sizeDcsBoot);
+					}
+				}
 				EfiBootInst.SaveFile(L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi", dcsBootImg, sizeDcsBoot);
 				// move configuration file from old location (if it exists) to new location
 				// we don't force the move operation if the new location already exists
@@ -3202,10 +3535,7 @@ namespace VeraCrypt
 
 				// move the original bootloader backup from old location (if it exists) to new location
 				// we don't force the move operation if the new location already exists
-				if (Is64BitOs())
-					EfiBootInst.RenameFile (L"\\EFI\\Boot\\original_bootx64_vc_backup.efi", L"\\EFI\\Boot\\original_bootx64.vc_backup", FALSE);
-				else
-					EfiBootInst.RenameFile (L"\\EFI\\Boot\\original_bootia32_vc_backup.efi", L"\\EFI\\Boot\\original_bootia32.vc_backup", FALSE);
+				EfiBootInst.RenameFile (L"\\EFI\\Boot\\original_bootx64_vc_backup.efi", L"\\EFI\\Boot\\original_bootx64.vc_backup", FALSE);
 
 				// Clean beta9
 				EfiBootInst.DelFile(L"\\DcsBoot.efi");
@@ -3228,50 +3558,67 @@ namespace VeraCrypt
 		}
 		else
 		{
-			byte bootLoaderBuf[TC_BOOT_LOADER_AREA_SIZE - TC_BOOT_ENCRYPTION_VOLUME_HEADER_SIZE] = {0};
-			CreateBootLoaderInMemory (bootLoaderBuf, sizeof (bootLoaderBuf), false, hiddenOSCreation);
-
-			// Write MBR
-			byte mbr[TC_SECTOR_SIZE_BIOS];
-
-			device.SeekAt (0);
-			device.Read (mbr, sizeof (mbr));
-
-			if (preserveUserConfig && BufferContainsString (mbr, sizeof (mbr), TC_APP_NAME))
+			try
 			{
-				uint16 version = BE16 (*(uint16 *) (mbr + TC_BOOT_SECTOR_VERSION_OFFSET));
-				if (version != 0)
-				{
-					bootLoaderBuf[TC_BOOT_SECTOR_USER_CONFIG_OFFSET] = mbr[TC_BOOT_SECTOR_USER_CONFIG_OFFSET];
-					memcpy (bootLoaderBuf + TC_BOOT_SECTOR_USER_MESSAGE_OFFSET, mbr + TC_BOOT_SECTOR_USER_MESSAGE_OFFSET, TC_BOOT_SECTOR_USER_MESSAGE_MAX_LENGTH);
+				uint8 bootLoaderBuf[TC_BOOT_LOADER_AREA_SIZE - TC_BOOT_ENCRYPTION_VOLUME_HEADER_SIZE] = {0};
+				CreateBootLoaderInMemory (bootLoaderBuf, sizeof (bootLoaderBuf), false, hiddenOSCreation);
 
-					if (bootLoaderBuf[TC_BOOT_SECTOR_USER_CONFIG_OFFSET] & TC_BOOT_USER_CFG_FLAG_DISABLE_PIM)
+				// Write MBR
+				uint8 mbr[TC_SECTOR_SIZE_BIOS];
+
+				device.SeekAt (0);
+				device.Read (mbr, sizeof (mbr));
+
+				if (preserveUserConfig && BufferContainsString (mbr, sizeof (mbr), TC_APP_NAME))
+				{
+					uint16 version = BE16 (*(uint16 *) (mbr + TC_BOOT_SECTOR_VERSION_OFFSET));
+					if (version != 0)
 					{
-						if (pim >= 0)
+						bootLoaderBuf[TC_BOOT_SECTOR_USER_CONFIG_OFFSET] = mbr[TC_BOOT_SECTOR_USER_CONFIG_OFFSET];
+						memcpy (bootLoaderBuf + TC_BOOT_SECTOR_USER_MESSAGE_OFFSET, mbr + TC_BOOT_SECTOR_USER_MESSAGE_OFFSET, TC_BOOT_SECTOR_USER_MESSAGE_MAX_LENGTH);
+
+						if (bootLoaderBuf[TC_BOOT_SECTOR_USER_CONFIG_OFFSET] & TC_BOOT_USER_CFG_FLAG_DISABLE_PIM)
 						{
-							memcpy (bootLoaderBuf + TC_BOOT_SECTOR_PIM_VALUE_OFFSET, &pim, TC_BOOT_SECTOR_PIM_VALUE_SIZE);
+							if (pim >= 0)
+							{
+								memcpy (bootLoaderBuf + TC_BOOT_SECTOR_PIM_VALUE_OFFSET, &pim, TC_BOOT_SECTOR_PIM_VALUE_SIZE);
+							}
+							else
+								memcpy (bootLoaderBuf + TC_BOOT_SECTOR_PIM_VALUE_OFFSET, mbr + TC_BOOT_SECTOR_PIM_VALUE_OFFSET, TC_BOOT_SECTOR_PIM_VALUE_SIZE);
 						}
-						else
-							memcpy (bootLoaderBuf + TC_BOOT_SECTOR_PIM_VALUE_OFFSET, mbr + TC_BOOT_SECTOR_PIM_VALUE_OFFSET, TC_BOOT_SECTOR_PIM_VALUE_SIZE);
 					}
 				}
+
+				// perform actual write only if content is different and either we are not in PostOOBE mode or the MBR contains VeraCrypt/Windows signature.
+				// this last check is done to avoid interfering with multi-boot configuration where MBR belongs to a boot manager like Grub
+				if (memcmp (mbr, bootLoaderBuf, TC_MAX_MBR_BOOT_CODE_SIZE) 
+					&& (!PostOOBEMode || BufferContainsString (mbr, sizeof (mbr), TC_APP_NAME) || IsWindowsMBR (mbr, sizeof (mbr))))
+				{
+					memcpy (mbr, bootLoaderBuf, TC_MAX_MBR_BOOT_CODE_SIZE);
+
+					device.SeekAt (0);
+					device.Write (mbr, sizeof (mbr));
+
+					uint8 mbrVerificationBuf[TC_SECTOR_SIZE_BIOS];
+					device.SeekAt (0);
+					device.Read (mbrVerificationBuf, sizeof (mbr));
+
+					if (memcmp (mbr, mbrVerificationBuf, sizeof (mbr)) != 0)
+						throw ErrorException ("ERROR_MBR_PROTECTED", SRC_POS);
+				}
+
+				if (!PostOOBEMode)
+				{
+					// Write boot loader
+					device.SeekAt (TC_SECTOR_SIZE_BIOS);
+					device.Write (bootLoaderBuf + TC_SECTOR_SIZE_BIOS, sizeof (bootLoaderBuf) - TC_SECTOR_SIZE_BIOS);
+				}
 			}
-
-			memcpy (mbr, bootLoaderBuf, TC_MAX_MBR_BOOT_CODE_SIZE);
-
-			device.SeekAt (0);
-			device.Write (mbr, sizeof (mbr));
-
-			byte mbrVerificationBuf[TC_SECTOR_SIZE_BIOS];
-			device.SeekAt (0);
-			device.Read (mbrVerificationBuf, sizeof (mbr));
-
-			if (memcmp (mbr, mbrVerificationBuf, sizeof (mbr)) != 0)
-				throw ErrorException ("ERROR_MBR_PROTECTED", SRC_POS);
-
-			// Write boot loader
-			device.SeekAt (TC_SECTOR_SIZE_BIOS);
-			device.Write (bootLoaderBuf + TC_SECTOR_SIZE_BIOS, sizeof (bootLoaderBuf) - TC_SECTOR_SIZE_BIOS);
+			catch (...)
+			{
+				if (!PostOOBEMode)
+					throw;
+			}
 		}
 
 		if (!IsAdmin() && IsUacSupported())
@@ -3294,9 +3641,9 @@ namespace VeraCrypt
 		if (config.SystemPartition.IsGPT)
 			return true;
 
-		byte bootLoaderBuf[TC_BOOT_LOADER_AREA_SIZE - TC_BOOT_ENCRYPTION_VOLUME_HEADER_SIZE] = {0};
-		byte fingerprint[WHIRLPOOL_DIGESTSIZE + SHA512_DIGESTSIZE];
-		byte expectedFingerprint[WHIRLPOOL_DIGESTSIZE + SHA512_DIGESTSIZE];
+		uint8 bootLoaderBuf[TC_BOOT_LOADER_AREA_SIZE - TC_BOOT_ENCRYPTION_VOLUME_HEADER_SIZE] = {0};
+		uint8 fingerprint[WHIRLPOOL_DIGESTSIZE + SHA512_DIGESTSIZE];
+		uint8 expectedFingerprint[WHIRLPOOL_DIGESTSIZE + SHA512_DIGESTSIZE];
 		bool bRet = false;
 
 		try
@@ -3367,80 +3714,59 @@ namespace VeraCrypt
 		{
 			// create EFI disk structure
 			DWORD sizeDcsBoot;
-#ifdef _WIN64
-			byte *dcsBootImg = MapResource(L"BIN", IDR_EFI_DCSBOOT, &sizeDcsBoot);
-#else
-			byte *dcsBootImg = MapResource(L"BIN", Is64BitOs()? IDR_EFI_DCSBOOT : IDR_EFI_DCSBOOT32, &sizeDcsBoot);
-#endif
+			uint8 *dcsBootImg = MapResource(L"BIN", IDR_EFI_DCSBOOT, &sizeDcsBoot);
 			if (!dcsBootImg)
 				throw ParameterIncorrect (SRC_POS);
 			DWORD sizeDcsInt;
-#ifdef _WIN64
-			byte *dcsIntImg = MapResource(L"BIN", IDR_EFI_DCSINT, &sizeDcsInt);
-#else
-			byte *dcsIntImg = MapResource(L"BIN", Is64BitOs()? IDR_EFI_DCSINT: IDR_EFI_DCSINT32, &sizeDcsInt);
-#endif
+			uint8 *dcsIntImg = MapResource(L"BIN", IDR_EFI_DCSINT, &sizeDcsInt);
 			if (!dcsIntImg)
 				throw ParameterIncorrect (SRC_POS);
 			DWORD sizeDcsCfg;
-#ifdef _WIN64
-			byte *dcsCfgImg = MapResource(L"BIN", IDR_EFI_DCSCFG, &sizeDcsCfg);
-#else
-			byte *dcsCfgImg = MapResource(L"BIN", Is64BitOs()? IDR_EFI_DCSCFG: IDR_EFI_DCSCFG32, &sizeDcsCfg);
-#endif
+			uint8 *dcsCfgImg = MapResource(L"BIN", IDR_EFI_DCSCFG, &sizeDcsCfg);
 			if (!dcsCfgImg)
 				throw ParameterIncorrect (SRC_POS);
 			DWORD sizeLegacySpeaker;
-#ifdef _WIN64
-			byte *LegacySpeakerImg = MapResource(L"BIN", IDR_EFI_LEGACYSPEAKER, &sizeLegacySpeaker);
-#else
-			byte *LegacySpeakerImg = MapResource(L"BIN", Is64BitOs()? IDR_EFI_LEGACYSPEAKER: IDR_EFI_LEGACYSPEAKER32, &sizeLegacySpeaker);
-#endif
+			uint8 *LegacySpeakerImg = MapResource(L"BIN", IDR_EFI_LEGACYSPEAKER, &sizeLegacySpeaker);
 			if (!LegacySpeakerImg)
 				throw ParameterIncorrect (SRC_POS);
 #ifdef VC_EFI_CUSTOM_MODE
 			DWORD sizeBootMenuLocker;
-#ifdef _WIN64
-			byte *BootMenuLockerImg = MapResource(L"BIN", IDR_EFI_DCSBML, &sizeBootMenuLocker);
-#else
-			byte *BootMenuLockerImg = MapResource(L"BIN", Is64BitOs()? IDR_EFI_DCSBML: IDR_EFI_DCSBML32, &sizeBootMenuLocker);
-#endif
+			uint8 *BootMenuLockerImg = MapResource(L"BIN", IDR_EFI_DCSBML, &sizeBootMenuLocker);
 			if (!BootMenuLockerImg)
 				throw ParameterIncorrect (SRC_POS);
 #endif
 			DWORD sizeDcsRescue;
-#ifdef _WIN64
-			byte *DcsRescueImg = MapResource(L"BIN", IDR_EFI_DCSRE, &sizeDcsRescue);
-#else
-			byte *DcsRescueImg = MapResource(L"BIN", Is64BitOs()? IDR_EFI_DCSRE: IDR_EFI_DCSRE32, &sizeDcsRescue);
-#endif
+			uint8 *DcsRescueImg = MapResource(L"BIN", IDR_EFI_DCSRE, &sizeDcsRescue);
 			if (!DcsRescueImg)
 				throw ParameterIncorrect (SRC_POS);
 			DWORD sizeDcsInfo;
-#ifdef _WIN64
-			byte *DcsInfoImg = MapResource(L"BIN", IDR_EFI_DCSINFO, &sizeDcsInfo);
-#else
-			byte *DcsInfoImg = MapResource(L"BIN", Is64BitOs()? IDR_EFI_DCSINFO: IDR_EFI_DCSINFO32, &sizeDcsInfo);
-#endif
+			uint8 *DcsInfoImg = MapResource(L"BIN", IDR_EFI_DCSINFO, &sizeDcsInfo);
 			if (!DcsInfoImg)
 				throw ParameterIncorrect (SRC_POS);
 
-			char szTmpPath[MAX_PATH + 1], szTmpFilePath[MAX_PATH + 1];
-			if (!GetTempPathA (MAX_PATH, szTmpPath))
+			WCHAR szTmpPath[MAX_PATH + 1], szTmpFilePath[MAX_PATH + 1];
+			if (!GetTempPathW (MAX_PATH, szTmpPath))
 				throw SystemException (SRC_POS);
-			if (!GetTempFileNameA (szTmpPath, "_vrd", 0, szTmpFilePath))
+			if (!GetTempFileNameW (szTmpPath, L"_vrd", 0, szTmpFilePath))
 				throw SystemException (SRC_POS);
 
-			finally_do_arg (char*, szTmpFilePath,  { DeleteFileA (finally_arg);});
+			finally_do_arg (WCHAR*, szTmpFilePath,  { DeleteFileW (finally_arg);});
 
 			int ierr;
-			zip_t* z = zip_open (szTmpFilePath, ZIP_CREATE | ZIP_TRUNCATE | ZIP_CHECKCONS, &ierr);
+
+			// convert szTmpFilePath to UTF-8 since this is what zip_open expected
+			char szUtf8Path[2*MAX_PATH + 1];
+			int utf8Len = WideCharToMultiByte (CP_UTF8, 0, szTmpFilePath, -1, szUtf8Path, sizeof (szUtf8Path), NULL, NULL);
+			if (utf8Len <= 0)
+				throw SystemException (SRC_POS);
+
+			zip_t* z = zip_open (szUtf8Path, ZIP_CREATE | ZIP_TRUNCATE | ZIP_CHECKCONS, &ierr);
 			if (!z)
 				throw ParameterIncorrect (SRC_POS);
 
 			finally_do_arg (zip_t**, &z, { if (*finally_arg) zip_discard (*finally_arg);});
 
-			if (!ZipAdd (z, Is64BitOs()? "EFI/Boot/bootx64.efi": "EFI/Boot/bootia32.efi", DcsRescueImg, sizeDcsRescue))
+			if (!ZipAdd (z, "EFI/Boot/bootx64.efi", DcsRescueImg, sizeDcsRescue))
 				throw ParameterIncorrect (SRC_POS);
 #ifdef VC_EFI_CUSTOM_MODE
 			if (!ZipAdd (z, "EFI/VeraCrypt/DcsBml.dcs", BootMenuLockerImg, sizeBootMenuLocker))
@@ -3489,7 +3815,7 @@ namespace VeraCrypt
 				sysBakFile.GetFileSize(fileSize);
 				fileBuf.Resize ((DWORD) fileSize);
 				DWORD sizeLoader = sysBakFile.Read (fileBuf.Ptr (), fileSize);
-				bLoadAdded = ZipAdd (z, Is64BitOs()? "EFI/Boot/original_bootx64.vc_backup": "EFI/Boot/original_bootia32.vc_backup", fileBuf.Ptr (), sizeLoader);				
+				bLoadAdded = ZipAdd (z, "EFI/Boot/original_bootx64.vc_backup", fileBuf.Ptr (), sizeLoader);				
 			}
 			catch (Exception &e)
 			{
@@ -3526,14 +3852,14 @@ namespace VeraCrypt
 			z = NULL;
 
 			// read the zip data from the temporary file
-			FILE* ftmpFile = fopen (szTmpFilePath, "rb");
+			FILE* ftmpFile = _wfopen (szTmpFilePath, L"rb");
 			if (!ftmpFile)
 				throw ParameterIncorrect (SRC_POS);
 
 			finally_do_arg (FILE*, ftmpFile, { fclose (finally_arg); });
 
 			unsigned long ulZipSize = (unsigned long) _filelength (_fileno (ftmpFile));
-			RescueZipData = new byte[ulZipSize];
+			RescueZipData = new uint8[ulZipSize];
 			if (!RescueZipData)
 				throw bad_alloc();
 
@@ -3556,7 +3882,7 @@ namespace VeraCrypt
 		{
 			Buffer imageBuf (RescueIsoImageSize);
 		
-			byte *image = imageBuf.Ptr();
+			uint8 *image = imageBuf.Ptr();
 			memset (image, 0, RescueIsoImageSize);
 
 			// Primary volume descriptor
@@ -3664,7 +3990,7 @@ namespace VeraCrypt
 			// Boot loader backup
 			CreateBootLoaderInMemory (image + TC_CD_BOOTSECTOR_OFFSET + TC_BOOT_LOADER_BACKUP_RESCUE_DISK_SECTOR_OFFSET, TC_BOOT_LOADER_AREA_SIZE, false);
 
-			RescueIsoImage = new byte[RescueIsoImageSize];
+			RescueIsoImage = new uint8[RescueIsoImageSize];
 			if (!RescueIsoImage)
 				throw bad_alloc();
 			memcpy (RescueIsoImage, image, RescueIsoImageSize);
@@ -3716,19 +4042,6 @@ namespace VeraCrypt
 				L"EFI/VeraCrypt/svh_bak",
 				L"EFI/Boot/original_bootx64.vc_backup"
 			};
-			
-			const wchar_t* efi32Files[] = {
-				L"EFI/Boot/bootia32.efi",
-#ifdef VC_EFI_CUSTOM_MODE
-				L"EFI/VeraCrypt/DcsBml.dcs",
-#endif
-				L"EFI/VeraCrypt/DcsBoot.efi",
-				L"EFI/VeraCrypt/DcsCfg.dcs",
-				L"EFI/VeraCrypt/DcsInt.dcs",
-				L"EFI/VeraCrypt/LegacySpeaker.dcs",
-				L"EFI/VeraCrypt/svh_bak",
-				L"EFI/Boot/original_bootia32.vc_backup"
-			};
 
 			zip_error_t zerr;
 			zip_source_t* zsrc = zip_source_buffer_create (RescueZipData, RescueZipSize, 0, &zerr);
@@ -3757,8 +4070,8 @@ namespace VeraCrypt
 								&& !wcsncmp (szNameBuffer, L"FAT", 3))
 						{
 							int i;		
-							const wchar_t** efiFiles = Is64BitOs()? efi64Files: efi32Files;
-							int efiFilesSize = Is64BitOs()? ARRAYSIZE(efi64Files): ARRAYSIZE(efi32Files);
+							const wchar_t** efiFiles = efi64Files;
+							int efiFilesSize = ARRAYSIZE(efi64Files);
 							for (i = 0; i < efiFilesSize; i++)
 							{
 								bool bMatch = false;
@@ -3911,25 +4224,12 @@ namespace VeraCrypt
 						L"EFI/VeraCrypt/svh_bak",
 						L"EFI/Boot/original_bootx64.vc_backup"
 					};
-					
-					const wchar_t* efi32Files[] = {
-						L"EFI/Boot/bootia32.efi",
-#ifdef VC_EFI_CUSTOM_MODE
-						L"EFI/VeraCrypt/DcsBml.dcs",
-#endif
-						L"EFI/VeraCrypt/DcsBoot.efi",
-						L"EFI/VeraCrypt/DcsCfg.dcs",
-						L"EFI/VeraCrypt/DcsInt.dcs",
-						L"EFI/VeraCrypt/LegacySpeaker.dcs",
-						L"EFI/VeraCrypt/svh_bak",
-						L"EFI/Boot/original_bootia32.vc_backup"
-					};
 
 					int i;
 					zip_stat_t statMem, statFile;
 					zip_int64_t indexMem, indexFile;
-					const wchar_t** efiFiles = Is64BitOs()? efi64Files: efi32Files;
-					int efiFilesSize = Is64BitOs()? ARRAYSIZE(efi64Files): ARRAYSIZE(efi32Files);
+					const wchar_t** efiFiles = efi64Files;
+					int efiFilesSize = ARRAYSIZE(efi64Files);
 					for (i = 0; i < efiFilesSize; i++)
 					{
 						bool bMatch = false;
@@ -4022,22 +4322,22 @@ namespace VeraCrypt
 		if (!IsRandomNumberGeneratorStarted())
 			throw ParameterIncorrect (SRC_POS);
 
-		throw_sys_if (CreateVolumeHeaderInMemory (ParentWindow, TRUE, (char *) VolumeHeader, ea, mode, password, pkcs5, pim, NULL, &cryptoInfo,
+		throw_sys_if (CreateVolumeHeaderInMemory (ParentWindow, TRUE, VolumeHeader, ea, mode, password, pkcs5, pim, NULL, &cryptoInfo,
 			volumeSize, 0, encryptedAreaStart, 0, TC_SYSENC_KEYSCOPE_MIN_REQ_PROG_VERSION, TC_HEADER_FLAG_ENCRYPTED_SYSTEM, TC_SECTOR_SIZE_BIOS, FALSE) != 0);
 
 		finally_do_arg (PCRYPTO_INFO*, &cryptoInfo, { crypto_close (*finally_arg); });
 
 		// Initial rescue disk assumes encryption of the drive has been completed (EncryptedAreaLength == volumeSize)
 		memcpy (RescueVolumeHeader, VolumeHeader, sizeof (RescueVolumeHeader));
-		if (0 != ReadVolumeHeader (TRUE, (char *) RescueVolumeHeader, password, pkcs5, pim, FALSE, NULL, cryptoInfo))
+		if (0 != ReadVolumeHeader (TRUE, RescueVolumeHeader, password, pkcs5, pim, NULL, cryptoInfo))
 			throw ParameterIncorrect (SRC_POS);
 
 		DecryptBuffer (RescueVolumeHeader + HEADER_ENCRYPTED_DATA_OFFSET, HEADER_ENCRYPTED_DATA_SIZE, cryptoInfo);
 
-		if (GetHeaderField32 (RescueVolumeHeader, TC_HEADER_OFFSET_MAGIC) != 0x56455241)
+		if (GetHeaderField32 (RescueVolumeHeader, TC_HEADER_OFFSET_MAGIC) != TC_HEADER_MAGIC_NUMBER)
 			throw ParameterIncorrect (SRC_POS);
 
-		byte *fieldPos = RescueVolumeHeader + TC_HEADER_OFFSET_ENCRYPTED_AREA_LENGTH;
+		uint8 *fieldPos = RescueVolumeHeader + TC_HEADER_OFFSET_ENCRYPTED_AREA_LENGTH;
 		mputInt64 (fieldPos, volumeSize);
 
 		// CRC of the header fields
@@ -4061,7 +4361,7 @@ namespace VeraCrypt
 		device.CheckOpened (SRC_POS);
 
 		device.SeekAt (TC_BOOT_VOLUME_HEADER_SECTOR_OFFSET);
-		device.Write ((byte *) VolumeHeader, sizeof (VolumeHeader));
+		device.Write ((uint8 *) VolumeHeader, sizeof (VolumeHeader));
 	}
 
 
@@ -4102,17 +4402,13 @@ namespace VeraCrypt
 				}
 			}
 			unsigned __int64 loaderSize = 0;
-			std::vector<byte> bootLoaderBuf;
-			const wchar_t * szStdEfiBootloader = Is64BitOs()? L"\\EFI\\Boot\\bootx64.efi": L"\\EFI\\Boot\\bootia32.efi";
-			const wchar_t * szBackupEfiBootloader = Is64BitOs()? L"\\EFI\\Boot\\original_bootx64.vc_backup": L"\\EFI\\Boot\\original_bootia32.vc_backup";
+			std::vector<uint8> bootLoaderBuf;
 			const wchar_t * szStdMsBootloader = L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi";
 			const wchar_t * szBackupMsBootloader = L"\\EFI\\Microsoft\\Boot\\bootmgfw_ms.vc";
 			const char* g_szMsBootString = "bootmgfw.pdb";
 			bool bModifiedMsBoot = true;
 
-			finally_do ({ EfiBootInst.DismountBootPartition(); });
-
-			EfiBootInst.MountBootPartition(0);		
+			EfiBootInst.PrepareBootPartition();		
 
 			EfiBootInst.GetFileSize(szStdMsBootloader, loaderSize);
 			bootLoaderBuf.resize ((size_t) loaderSize);
@@ -4159,43 +4455,14 @@ namespace VeraCrypt
 			}
 
 			EfiBootInst.CopyFile (szStdMsBootloader, szBackupMsBootloader);
-
-			if (EfiBootInst.FileExists (szStdEfiBootloader))
-			{
-				EfiBootInst.GetFileSize (szStdEfiBootloader, loaderSize);
-
-				bootLoaderBuf.resize ((size_t) loaderSize);
-
-				EfiBootInst.ReadFile (szStdEfiBootloader, &bootLoaderBuf[0], (DWORD) loaderSize);
-
-				// Prevent VeraCrypt EFI loader from being backed up
-				if (BufferHasPattern (bootLoaderBuf.data (), (size_t) loaderSize, _T(TC_APP_NAME), wcslen (_T(TC_APP_NAME)) * 2))
-				{
-					if (AskWarnNoYes ("TC_BOOT_LOADER_ALREADY_INSTALLED", ParentWindow) == IDNO)
-						throw UserAbort (SRC_POS);
-
-					// check if backup exists already and if it has bootmgfw signature
-					if (EfiBootInst.FileExists (szBackupEfiBootloader))
-					{
-						// perform the backup on disk using this file
-						EfiBootInst.CopyFile (szBackupEfiBootloader, GetSystemLoaderBackupPath().c_str());
-					}
-
-					return;
-				}
-
-				EfiBootInst.CopyFile (szStdEfiBootloader, GetSystemLoaderBackupPath().c_str());
-				EfiBootInst.CopyFile (szStdEfiBootloader, szBackupEfiBootloader);
-			}
-			else
-				EfiBootInst.CopyFile (szStdMsBootloader, GetSystemLoaderBackupPath().c_str());
+			EfiBootInst.CopyFile (szStdMsBootloader, GetSystemLoaderBackupPath().c_str());
 
 		}
 		else
 		{
 			Device device (GetSystemDriveConfiguration().DevicePath, true);
 			device.CheckOpened (SRC_POS);
-			byte bootLoaderBuf[TC_BOOT_LOADER_AREA_SECTOR_COUNT * TC_SECTOR_SIZE_BIOS];
+			uint8 bootLoaderBuf[TC_BOOT_LOADER_AREA_SECTOR_COUNT * TC_SECTOR_SIZE_BIOS];
 
 			device.SeekAt (0);
 			device.Read (bootLoaderBuf, sizeof (bootLoaderBuf));
@@ -4233,40 +4500,38 @@ namespace VeraCrypt
 				}
 			}
 
-			finally_do ({ EfiBootInst.DismountBootPartition(); });
-
-			EfiBootInst.MountBootPartition(0);			
+			EfiBootInst.PrepareBootPartition();			
 
 			EfiBootInst.DeleteStartExec();
 			EfiBootInst.DeleteStartExec(0xDC5B, L"Driver"); // remove DcsBml boot driver it was installed
-			if (Is64BitOs())
-				EfiBootInst.RenameFile(L"\\EFI\\Boot\\original_bootx64.vc_backup", L"\\EFI\\Boot\\bootx64.efi", TRUE);
-			else
-				EfiBootInst.RenameFile(L"\\EFI\\Boot\\original_bootia32.vc_backup", L"\\EFI\\Boot\\bootia32.efi", TRUE);
+			EfiBootInst.RenameFile(L"\\EFI\\Boot\\original_bootx64.vc_backup", L"\\EFI\\Boot\\bootx64.efi", TRUE);
 
 			if (!EfiBootInst.RenameFile(L"\\EFI\\Microsoft\\Boot\\bootmgfw_ms.vc", L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi", TRUE))
 			{
 				EfiBootConf conf;
 				if (EfiBootInst.ReadConfig (L"\\EFI\\VeraCrypt\\DcsProp", conf) && strlen (conf.actionSuccessValue.c_str()))
 				{
-					string actionValue = conf.actionSuccessValue;
-					std::transform(actionValue.begin(), actionValue.end(), actionValue.begin(), ::tolower);
-
-					if (strstr (actionValue.c_str(), "postexec") && strstr (actionValue.c_str(), "file("))
+					wstring loaderPath;
+					if (EfiBootConf::IsPostExecFileField (conf.actionSuccessValue, loaderPath))
 					{
-						char c;
-						const char* ptr = strstr (actionValue.c_str(), "file(");
-						ptr += 5;
-						wstring loaderPath = L"\\";
-						while ((c = *ptr))
+						// check that it is not bootmgfw_ms.vc or bootmgfw.efi
+						if (	(0 != _wcsicmp (loaderPath.c_str(), L"\\EFI\\Microsoft\\Boot\\bootmgfw_ms.vc"))
+							&&	(0 != _wcsicmp (loaderPath.c_str(), L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi"))
+							)
 						{
-							if (c == ')' || c == ' ')
-								break;
-							loaderPath += (wchar_t) c;
-							ptr++;
-						}
+							const char* g_szMsBootString = "bootmgfw.pdb";
+							unsigned __int64 loaderSize = 0;
+							EfiBootInst.GetFileSize(loaderPath.c_str(), loaderSize);
+							std::vector<uint8> bootLoaderBuf ((size_t) loaderSize);
 
-						EfiBootInst.RenameFile(loaderPath.c_str(), L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi", TRUE);
+							EfiBootInst.ReadFile(loaderPath.c_str(), &bootLoaderBuf[0], (DWORD) loaderSize);
+
+							// look for bootmgfw.efi identifiant string
+							if (BufferHasPattern (bootLoaderBuf.data (), (size_t) loaderSize, g_szMsBootString, strlen (g_szMsBootString)))
+							{
+								EfiBootInst.RenameFile(loaderPath.c_str(), L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi", TRUE);
+							}
+						}
 					}
 				}
 			}
@@ -4291,7 +4556,7 @@ namespace VeraCrypt
 		}
 		else
 		{
-			byte bootLoaderBuf[TC_BOOT_LOADER_AREA_SECTOR_COUNT * TC_SECTOR_SIZE_BIOS];
+			uint8 bootLoaderBuf[TC_BOOT_LOADER_AREA_SECTOR_COUNT * TC_SECTOR_SIZE_BIOS];
 
 			File backupFile (GetSystemLoaderBackupPath(), true);
 			backupFile.CheckOpened(SRC_POS);
@@ -4302,7 +4567,7 @@ namespace VeraCrypt
 			device.CheckOpened (SRC_POS);
 
 			// Preserve current partition table
-			byte mbr[TC_SECTOR_SIZE_BIOS];
+			uint8 mbr[TC_SECTOR_SIZE_BIOS];
 			device.SeekAt (0);
 			device.Read (mbr, sizeof (mbr));
 			memcpy (bootLoaderBuf + TC_MAX_MBR_BOOT_CODE_SIZE, mbr + TC_MAX_MBR_BOOT_CODE_SIZE, sizeof (mbr) - TC_MAX_MBR_BOOT_CODE_SIZE);
@@ -4422,9 +4687,6 @@ namespace VeraCrypt
 			break;
 
 		case DumpFilter:
-			if (!IsOSAtLeast (WIN_VISTA))
-				return;
-
 			filter = "veracrypt.sys";
 			filterReg = "DumpFilters";
 			SetLastError (RegOpenKeyEx (HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\CrashControl", 0, KEY_READ | KEY_WRITE, &regKey));
@@ -4445,7 +4707,7 @@ namespace VeraCrypt
 				// Register class filter below all other filters in the stack
 
 				size_t strSize = filter.size() + 1;
-				byte regKeyBuf[65536];
+				uint8 regKeyBuf[65536];
 				DWORD size = (DWORD) (sizeof (regKeyBuf) - strSize);
 
 				// SetupInstallFromInfSection() does not support prepending of values so we have to modify the registry directly
@@ -4463,8 +4725,8 @@ namespace VeraCrypt
 				// read initial value
 				DWORD strSize = (DWORD) filter.size() + 1, expectedSize;
 				Buffer expectedRegKeyBuf(65536), outputRegKeyBuf(65536);
-				byte* pbExpectedRegKeyBuf = expectedRegKeyBuf.Ptr ();
-				byte* pbOutputRegKeyBuf = outputRegKeyBuf.Ptr ();
+				uint8* pbExpectedRegKeyBuf = expectedRegKeyBuf.Ptr ();
+				uint8* pbOutputRegKeyBuf = outputRegKeyBuf.Ptr ();
 				DWORD initialSize = (DWORD) (expectedRegKeyBuf.Size() - strSize - 2);				
 
 				if (RegQueryValueExA (regKey, filterReg.c_str(), NULL, NULL, pbExpectedRegKeyBuf, &initialSize) != ERROR_SUCCESS)
@@ -4516,7 +4778,7 @@ namespace VeraCrypt
 
 			// remove value in case it was not done properly
 			Buffer regKeyBuf(65536);
-			byte* pbRegKeyBuf = regKeyBuf.Ptr ();
+			uint8* pbRegKeyBuf = regKeyBuf.Ptr ();
 
 			DWORD initialSize = (DWORD) regKeyBuf.Size() - 2;				
 
@@ -4586,6 +4848,16 @@ namespace VeraCrypt
 
 		if (registerService)
 		{
+			// check if service already exists.
+			// If yes then start it immediatly after reinstalling it
+			bool bAlreadyExists = false;
+			SC_HANDLE service = OpenService (scm, TC_SYSTEM_FAVORITES_SERVICE_NAME, GENERIC_READ);
+			if (service)
+			{
+				bAlreadyExists = true;
+				CloseServiceHandle (service);
+			}
+
 			try
 			{
 				RegisterSystemFavoritesService (FALSE, noFileHandling);
@@ -4596,11 +4868,19 @@ namespace VeraCrypt
 			{
 				wchar_t appPath[TC_MAX_PATH];
 				throw_sys_if (!GetModuleFileName (NULL, appPath, ARRAYSIZE (appPath)));
-
+				/* explicitely specify VeraCrypt.exe as the file to copy and don't rely
+				 * on the fact we will be always called by VeraCrypt.exe because it's not
+				 * always true.
+				 */
+				wchar_t* ptr = wcsrchr (appPath, L'\\');
+				if (ptr)
+					ptr[1] = 0;
+				StringCchCatW (appPath, ARRAYSIZE (appPath), _T(TC_APP_NAME) L".exe");
+		
 				throw_sys_if (!CopyFile (appPath, servicePath.c_str(), FALSE));
 			}
 
-			SC_HANDLE service = CreateService (scm,
+			service = CreateService (scm,
 				TC_SYSTEM_FAVORITES_SERVICE_NAME,
 				_T(TC_APP_NAME) L" System Favorites",
 				SERVICE_ALL_ACCESS,
@@ -4620,14 +4900,16 @@ namespace VeraCrypt
 			description.lpDescription = L"Mounts VeraCrypt system favorite volumes.";
 			ChangeServiceConfig2 (service, SERVICE_CONFIG_DESCRIPTION, &description);
 
+			// start the service immediatly if it already existed before
+			if (bAlreadyExists)
+				StartService (service, 0, NULL);
+
 			CloseServiceHandle (service);
 
 			try
 			{
 				WriteLocalMachineRegistryString (L"SYSTEM\\CurrentControlSet\\Control\\SafeBoot\\Minimal\\" TC_SYSTEM_FAVORITES_SERVICE_NAME, NULL, L"Service", FALSE);
 				WriteLocalMachineRegistryString (L"SYSTEM\\CurrentControlSet\\Control\\SafeBoot\\Network\\" TC_SYSTEM_FAVORITES_SERVICE_NAME, NULL, L"Service", FALSE);
-
-				SetDriverConfigurationFlag (TC_DRIVER_CONFIG_CACHE_BOOT_PASSWORD_FOR_SYS_FAVORITES, true);
 			}
 			catch (...)
 			{
@@ -4642,13 +4924,14 @@ namespace VeraCrypt
 		}
 		else
 		{
-			SetDriverConfigurationFlag (TC_DRIVER_CONFIG_CACHE_BOOT_PASSWORD_FOR_SYS_FAVORITES, false);
-
 			DeleteLocalMachineRegistryKey (L"SYSTEM\\CurrentControlSet\\Control\\SafeBoot\\Minimal", TC_SYSTEM_FAVORITES_SERVICE_NAME);
 			DeleteLocalMachineRegistryKey (L"SYSTEM\\CurrentControlSet\\Control\\SafeBoot\\Network", TC_SYSTEM_FAVORITES_SERVICE_NAME);
 
 			SC_HANDLE service = OpenService (scm, TC_SYSTEM_FAVORITES_SERVICE_NAME, SERVICE_ALL_ACCESS);
 			throw_sys_if (!service);
+
+			SERVICE_STATUS serviceStatus = {0};
+			ControlService (service, SERVICE_CONTROL_STOP, &serviceStatus);
 
 			throw_sys_if (!DeleteService (service));
 			CloseServiceHandle (service);
@@ -4660,6 +4943,30 @@ namespace VeraCrypt
 					DeleteFile (serviceLegacyPath.c_str());
 			}
 		}
+	}
+
+	bool BootEncryption::IsSystemFavoritesServiceRunning ()
+	{
+		bool bRet = false;
+		SC_HANDLE scm = OpenSCManager (NULL, NULL, SC_MANAGER_CONNECT);
+		if (scm)
+		{
+			SC_HANDLE service = OpenService(scm, TC_SYSTEM_FAVORITES_SERVICE_NAME, GENERIC_READ);
+			if (service)
+			{
+				SERVICE_STATUS status;
+				if (QueryServiceStatus(service, &status))
+				{
+					bRet = (status.dwCurrentState == SERVICE_RUNNING);
+				}
+
+				CloseServiceHandle(service);
+			}
+
+			CloseServiceHandle (scm);
+		}
+
+		return bRet;
 	}
 
 	void BootEncryption::UpdateSystemFavoritesService ()
@@ -4711,6 +5018,21 @@ namespace VeraCrypt
 #endif
 	}
 
+	void BootEncryption::SetServiceConfigurationFlag (uint32 flag, bool state)
+	{
+		DWORD configMap = ReadServiceConfigurationFlags();
+
+		if (state)
+			configMap |= flag;
+		else
+			configMap &= ~flag;
+#ifdef SETUP
+		WriteLocalMachineRegistryDword (L"SYSTEM\\CurrentControlSet\\Services\\" TC_SYSTEM_FAVORITES_SERVICE_NAME, TC_SYSTEM_FAVORITES_SERVICE_NAME L"Config", configMap);
+#else
+		WriteLocalMachineRegistryDwordValue (L"SYSTEM\\CurrentControlSet\\Services\\" TC_SYSTEM_FAVORITES_SERVICE_NAME, TC_SYSTEM_FAVORITES_SERVICE_NAME L"Config", configMap);
+#endif
+	}
+
 #ifndef SETUP
 
 	void BootEncryption::RegisterSystemFavoritesService (BOOL registerService)
@@ -4735,8 +5057,7 @@ namespace VeraCrypt
 			}
 			else
 			{
-				finally_do ({ EfiBootInst.DismountBootPartition(); });
-				EfiBootInst.MountBootPartition(0);		
+				EfiBootInst.PrepareBootPartition();		
 				memcpy (pSdn, EfiBootInst.GetStorageDeviceNumber(), sizeof (STORAGE_DEVICE_NUMBER));
 			}
 		}
@@ -4746,7 +5067,9 @@ namespace VeraCrypt
 			throw SystemException (SRC_POS);
 		}
 	}
+#endif
 
+#if defined(VC_EFI_CUSTOM_MODE) || !defined(SETUP)
 	void BootEncryption::GetSecureBootConfig (BOOL* pSecureBootEnabled, BOOL *pVeraCryptKeysLoaded)
 	{
 		SystemDriveConfiguration config = GetSystemDriveConfiguration ();
@@ -4786,17 +5109,24 @@ namespace VeraCrypt
 			throw SystemException (SRC_POS);
 		}
 	}
-
+#endif
+#ifndef SETUP
 	void BootEncryption::CheckRequirements ()
-	{
-		if (nCurrentOS == WIN_2000)
-			throw ErrorException ("SYS_ENCRYPTION_UNSUPPORTED_ON_CURRENT_OS", SRC_POS);
- 
+	{ 
 		if (CurrentOSMajor == 6 && CurrentOSMinor == 0 && CurrentOSServicePack < 1)
 			throw ErrorException ("SYS_ENCRYPTION_UNSUPPORTED_ON_VISTA_SP0", SRC_POS);
 
+		if (IsARM())
+			throw ErrorException ("SYS_ENCRYPTION_UNSUPPORTED_ON_CURRENT_OS", SRC_POS);
+
 		if (IsNonInstallMode())
 			throw ErrorException ("FEATURE_REQUIRES_INSTALLATION", SRC_POS);
+
+		/* check if the system drive is already encrypted by BitLocker */
+		wchar_t windowsDrive = (wchar_t) towupper (GetWindowsDirectory()[0]);
+		BitLockerEncryptionStatus bitLockerStatus = GetBitLockerEncryptionStatus (windowsDrive);
+		if (bitLockerStatus == BL_Status_Protected)
+			throw ErrorException ("SYSENC_BITLOCKER_CONFLICT", SRC_POS);
 
 		SystemDriveConfiguration config = GetSystemDriveConfiguration ();
 
@@ -4936,12 +5266,12 @@ namespace VeraCrypt
             // Verify CRC of header salt
             Device device(config.DevicePath, true);
             device.CheckOpened(SRC_POS);
-            byte header[TC_BOOT_ENCRYPTION_VOLUME_HEADER_SIZE];
+            uint8 header[TC_BOOT_ENCRYPTION_VOLUME_HEADER_SIZE];
 
             device.SeekAt(TC_BOOT_VOLUME_HEADER_SECTOR_OFFSET);
             device.Read(header, sizeof(header));
 
-            if (encStatus.VolumeHeaderSaltCrc32 != GetCrc32((byte *)header, PKCS5_SALT_SIZE))
+            if (encStatus.VolumeHeaderSaltCrc32 != GetCrc32((uint8 *)header, PKCS5_SALT_SIZE))
                throw ParameterIncorrect(SRC_POS);
          }
       }
@@ -4968,7 +5298,7 @@ namespace VeraCrypt
 
 		try
 		{
-			RegisterSystemFavoritesService (false);
+			RegisterSystemFavoritesService (FALSE);
 		}
 		catch (...) { }
 
@@ -4998,7 +5328,7 @@ namespace VeraCrypt
 
 		SystemDriveConfiguration config = GetSystemDriveConfiguration ();
 
-		char header[TC_BOOT_ENCRYPTION_VOLUME_HEADER_SIZE];
+		unsigned char header[TC_BOOT_ENCRYPTION_VOLUME_HEADER_SIZE];
 		Device device (config.DevicePath);
 		device.CheckOpened (SRC_POS);
 
@@ -5028,12 +5358,16 @@ namespace VeraCrypt
 		}
 
 		device.SeekAt (headerOffset);
-		device.Read ((byte *) header, sizeof (header));
+		device.Read (header, sizeof (header));
 
 		PCRYPTO_INFO cryptoInfo = NULL;
 		
-		int status = ReadVolumeHeader (!encStatus.HiddenSystem, header, oldPassword, old_pkcs5, old_pim, FALSE, &cryptoInfo, NULL);
+		int status = ReadVolumeHeader (!encStatus.HiddenSystem, header, oldPassword, old_pkcs5, old_pim, &cryptoInfo, NULL);
 		finally_do_arg (PCRYPTO_INFO, cryptoInfo, { if (finally_arg) crypto_close (finally_arg); });
+
+		// if the XTS master key is vulnerable, return error and do not allow the user to change the password since the master key will not be changed
+		if ((status == 0) && cryptoInfo->bVulnerableMasterKey)
+			status = ERR_SYSENC_XTS_MASTERKEY_VULNERABLE;
 
 		if (status != 0)
 		{
@@ -5116,7 +5450,7 @@ namespace VeraCrypt
 					}
 
 					device.SeekAt (headerOffset);
-					device.Write ((byte *) header, sizeof (header));
+					device.Write ((uint8 *) header, sizeof (header));
 					headerUpdated = true;
 				}
 
@@ -5147,7 +5481,7 @@ namespace VeraCrypt
 				try
 				{
 					// check if PIM is stored in MBR
-					byte userConfig = 0;
+					uint8 userConfig = 0;
 					if (	ReadBootSectorConfig (nullptr, 0, &userConfig)
 						&& (userConfig & TC_BOOT_USER_CFG_FLAG_DISABLE_PIM)
 						)
@@ -5196,6 +5530,8 @@ namespace VeraCrypt
 				InstallVolumeHeader ();
 
 			RegisterBootDriver (hiddenSystem);
+
+			RegisterSystemFavoritesService (TRUE);
 		}
 		catch (Exception &)
 		{
@@ -5287,6 +5623,16 @@ namespace VeraCrypt
 		
 		if (!rescueIsoImagePath.empty())
 			CreateRescueIsoImage (true, rescueIsoImagePath);
+
+		// check if Fast Startup is enabled and if yes then offer to disable it
+		BOOL bHibernateEnabled = FALSE, bHiberbootEnabled = FALSE;
+		if (GetHibernateStatus (bHibernateEnabled, bHiberbootEnabled) && bHiberbootEnabled)
+		{
+			if (AskWarnYesNo ("CONFIRM_DISABLE_FAST_STARTUP", ParentWindow) == IDYES)
+			{
+				WriteLocalMachineRegistryDwordValue (L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power", L"HiberbootEnabled", 0);
+			}
+		}
 	}
 
 	bool BootEncryption::IsPagingFileActive (BOOL checkNonWindowsPartitionsOnly)
@@ -5315,6 +5661,22 @@ namespace VeraCrypt
 		}
 
 		throw_sys_if (!WriteLocalMachineRegistryDword (keyPath, valueName, value));
+	}
+
+	void BootEncryption::NotifyService (DWORD dwNotifyCmd)
+	{
+		if (!IsAdmin() && IsUacSupported())
+		{
+			Elevator::NotifyService (dwNotifyCmd);
+			return;
+		}
+
+		DWORD dwRet = SendServiceNotification(dwNotifyCmd);
+		if (dwRet != ERROR_SUCCESS)
+		{
+			SetLastError(dwRet);
+			throw SystemException (SRC_POS);
+		}
 	}
 
 	void BootEncryption::StartDecryption (BOOL discardUnreadableEncryptedSectors)
@@ -5386,7 +5748,17 @@ namespace VeraCrypt
 		return configMap;
 	}
 
-	void BootEncryption::WriteBootDriveSector (uint64 offset, byte *data)
+	uint32 BootEncryption::ReadServiceConfigurationFlags ()
+	{
+		DWORD configMap;
+
+		if (!ReadLocalMachineRegistryDword (L"SYSTEM\\CurrentControlSet\\Services\\" TC_SYSTEM_FAVORITES_SERVICE_NAME, TC_SYSTEM_FAVORITES_SERVICE_NAME L"Config", &configMap))
+			configMap = 0;
+
+		return configMap;
+	}
+
+	void BootEncryption::WriteBootDriveSector (uint64 offset, uint8 *data)
 	{
 		WriteBootDriveSectorRequest request;
 		request.Offset.QuadPart = offset;
@@ -5430,5 +5802,33 @@ namespace VeraCrypt
 	bool BootEncryption::RestartComputer (BOOL bShutdown)
 	{
 		return (::RestartComputer(bShutdown) != FALSE);
+	}
+
+	bool BootEncryption::IsUsingUnsupportedAlgorithm(LONG driverVersion)
+	{
+		bool bRet = false;
+
+		try
+		{
+			if (driverVersion <= 0x125)
+			{
+				// version 1.25 is last version to support RIPEMD160 and GOST89
+				static int GOST89_EA = 5;
+				static int RIPEMD160_PRF = 4;
+
+				VOLUME_PROPERTIES_STRUCT props = {0};
+				GetVolumeProperties(&props);
+
+				//
+				if (props.ea == GOST89_EA || props.pkcs5 == RIPEMD160_PRF)
+					bRet = true;
+			}
+		}
+		catch(...)
+		{
+
+		}
+
+		return bRet;
 	}
 }

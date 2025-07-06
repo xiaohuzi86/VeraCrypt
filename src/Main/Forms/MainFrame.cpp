@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -46,6 +46,9 @@ namespace VeraCrypt
 	DEFINE_EVENT_TYPE(wxEVT_COMMAND_SHOW_WARNING)
 
 	MainFrame::MainFrame (wxWindow* parent) : MainFrameBase (parent),
+#ifdef HAVE_INDICATORS
+		indicator (NULL),
+#endif
 		ListItemRightClickEventPending (false),
 		SelectedItemIndex (-1),
 		SelectedSlotNumber (0),
@@ -81,6 +84,7 @@ namespace VeraCrypt
 		InitTaskBarIcon();
 		InitEvents();
 		InitMessageFilter();
+		InitWindowPrivacy();
 
 		if (!GetPreferences().SecurityTokenModule.IsEmpty() && !SecurityToken::IsInitialized())
 		{
@@ -99,6 +103,9 @@ namespace VeraCrypt
 		Connect( wxID_ANY, wxEVT_COMMAND_PREF_UPDATED, wxCommandEventHandler( MainFrame::OnPreferencesUpdated ) );
 		Connect( wxID_ANY, wxEVT_COMMAND_OPEN_VOLUME_REQUEST, wxCommandEventHandler( MainFrame::OnOpenVolumeSystemRequest ) );
 
+#ifdef TC_MACOSX
+		Connect( wxID_ANY, wxEVT_MOVE, wxMoveEventHandler( MainFrame::OnMoveHandler ) );
+#endif
 	}
 
 	MainFrame::~MainFrame ()
@@ -119,6 +126,9 @@ namespace VeraCrypt
 		Disconnect( wxID_ANY, wxEVT_COMMAND_UPDATE_VOLUME_LIST, wxCommandEventHandler( MainFrame::OnUpdateVolumeList ) );
 		Disconnect( wxID_ANY, wxEVT_COMMAND_PREF_UPDATED, wxCommandEventHandler( MainFrame::OnPreferencesUpdated ) );
 		Disconnect( wxID_ANY, wxEVT_COMMAND_OPEN_VOLUME_REQUEST, wxCommandEventHandler( MainFrame::OnOpenVolumeSystemRequest ) );
+#ifdef TC_MACOSX
+		Disconnect( wxID_ANY, wxEVT_MOVE, wxMoveEventHandler( MainFrame::OnMoveHandler ) );
+#endif
 		Core->VolumeMountedEvent.Disconnect (this);
 		Core->VolumeDismountedEvent.Disconnect (this);
 		Gui->OpenVolumeSystemRequestEvent.Disconnect (this);
@@ -213,7 +223,7 @@ namespace VeraCrypt
 					L"cmd.exe", args.c_str(), nullptr, SW_SHOW);
 #else
 #	ifdef TC_MACOSX
-				Gui->ShowInfo (_("Disk Utility will be launched after you press 'OK'.\n\nPlease select your volume in the Disk Utility window and press 'Verify Disk' or 'Repair Disk' button on the 'First Aid' page."));
+				Gui->ShowInfo (LangString["LINUX_FIRST_AID"]);
 #	endif
 				Core->CheckFilesystem (selectedVolume, repair);
 				UpdateVolumeList();
@@ -276,15 +286,15 @@ namespace VeraCrypt
 		VolumeStaticBoxSizer->Detach (VolumeGridBagSizer);
 		VolumeStaticBoxSizer->Add (VolumeGridBagSizer, 1, wxEXPAND, 0);
 
-		ExitButton->SetLabel (_("Close"));
-		MountAllDevicesButton->SetLabel (_("Mount All Devices"));
+		ExitButton->SetLabel (LangString["IDCLOSE"]);
+		MountAllDevicesButton->SetLabel (LangString["LINUX_MOUNT_ALL_DEV"]);
 #endif
 
 #ifdef TC_WINDOWS
 		SlotListCtrl->InsertColumn (ColumnSlot, LangString["DRIVE"], wxLIST_FORMAT_LEFT, 1);
 		colPermilles.push_back (75);
 #else
-		SlotListCtrl->InsertColumn (ColumnSlot, _("Slot"), wxLIST_FORMAT_LEFT, 1);
+		SlotListCtrl->InsertColumn (ColumnSlot, LangString["TOKEN_SLOT_ID"], wxLIST_FORMAT_LEFT, 1);
 		colPermilles.push_back (82);
 #endif
 
@@ -393,10 +403,8 @@ namespace VeraCrypt
 		};
 
 		SetDropTarget (new FileDropTarget (this));
-#ifdef TC_MACOSX
 		foreach (wxWindow *c, MainPanel->GetChildren())
 			c->SetDropTarget (new FileDropTarget (this));
-#endif
 
 		// Volume history
 		VolumeHistory::ConnectComboBox (VolumePathComboBox);
@@ -463,6 +471,12 @@ namespace VeraCrypt
 #endif
 	}
 
+
+	void MainFrame::InitWindowPrivacy ()
+	{
+		Gui->SetContentProtection(!CmdLine->ArgAllowScreencapture);
+	}
+
 	void MainFrame::InitPreferences ()
 	{
 		try
@@ -489,7 +503,7 @@ namespace VeraCrypt
 		catch (exception &e)
 		{
 			Gui->ShowError (e);
-			Gui->ShowError (_("Error while loading configuration files located in ") + wstring (Application::GetConfigFilePath (L"")));
+			Gui->ShowError (LangString["LINUX_ERROR_LOADING_CONFIG"] + wstring (Application::GetConfigFilePath (L"")));
 		}
 	}
 
@@ -505,13 +519,13 @@ namespace VeraCrypt
 
 			wxMenu *CreatePopupMenu ()
 			{
-				auto_ptr <wxMenu> popup (new wxMenu);
+				unique_ptr <wxMenu> popup (new wxMenu);
 
 				Gui->AppendToMenu (*popup, LangString[Gui->IsInBackgroundMode() ? "SHOW_TC" : "HIDE_TC"], this, wxCommandEventHandler (TaskBarIcon::OnShowHideMenuItemSelected));
 
 				popup->AppendSeparator();
-				Gui->AppendToMenu (*popup, _("Mount All Favorite Volumes"), this, wxCommandEventHandler (TaskBarIcon::OnMountAllFavoritesMenuItemSelected))->Enable (!Busy);
-				Gui->AppendToMenu (*popup, _("Dismount All Mounted Volumes"), this, wxCommandEventHandler (TaskBarIcon::OnDismountAllMenuItemSelected))->Enable (!Busy);
+				Gui->AppendToMenu (*popup, LangString["IDM_MOUNT_FAVORITE_VOLUMES"], this, wxCommandEventHandler (TaskBarIcon::OnMountAllFavoritesMenuItemSelected))->Enable (!Busy);
+				Gui->AppendToMenu (*popup, LangString["HK_UNMOUNT_ALL"], this, wxCommandEventHandler (TaskBarIcon::OnDismountAllMenuItemSelected))->Enable (!Busy);
 
 				// Favorite volumes
 				if (Gui->GetPreferences().BackgroundTaskMenuMountItemsEnabled && !Frame->FavoriteVolumesMenuMap.empty())
@@ -520,7 +534,8 @@ namespace VeraCrypt
 					typedef pair <int, FavoriteVolume> FavMapPair;
 					foreach (FavMapPair fp, Frame->FavoriteVolumesMenuMap)
 					{
-						Gui->AppendToMenu (*popup, LangString["MOUNT"] + L" " + wstring (fp.second.Path) + (fp.second.MountPoint.IsEmpty() ? L"" : L"  " + wstring (fp.second.MountPoint)),
+						//TBH Gui->AppendToMenu (*popup, LangString["MOUNT"] + L" " + wstring (fp.second.Path) + (fp.second.MountPoint.IsEmpty() ? L"" : L"  " + wstring (fp.second.MountPoint)),
+						Gui->AppendToMenu (*popup, LangString["MOUNT_BUTTON"] + L" " + wstring (fp.second.Path) + (fp.second.MountPoint.IsEmpty() ? L"" : L"  " + wstring (fp.second.MountPoint)),
 							this, wxCommandEventHandler (TaskBarIcon::OnFavoriteVolumeMenuItemSelected), fp.first)->Enable (!Busy);
 					}
 				}
@@ -550,7 +565,7 @@ namespace VeraCrypt
 						DismountMap.clear();
 						foreach (shared_ptr <VolumeInfo> volume, mountedVolumes)
 						{
-							wxString label = LangString["DISMOUNT"] + L" ";
+							wxString label = LangString["UNMOUNT"] + L" ";
 
 							if (!volume->MountPoint.IsEmpty())
 								label += wstring (volume->MountPoint) + L" (" + wstring (volume->Path) + L")";
@@ -565,10 +580,10 @@ namespace VeraCrypt
 				}
 
 				popup->AppendSeparator();
-				Gui->AppendToMenu (*popup, _("Preferences..."), this, wxCommandEventHandler (TaskBarIcon::OnPreferencesMenuItemSelected))->Enable (!Busy);
+				Gui->AppendToMenu (*popup, LangString["IDM_PREFERENCES"], this, wxCommandEventHandler (TaskBarIcon::OnPreferencesMenuItemSelected))->Enable (!Busy);
 #ifndef TC_MACOSX
 				popup->AppendSeparator();
-				Gui->AppendToMenu (*popup, _("Exit"), this, wxCommandEventHandler (TaskBarIcon::OnExitMenuItemSelected))->Enable (!Busy && Frame->CanExit());
+				Gui->AppendToMenu (*popup, LangString["EXIT"], this, wxCommandEventHandler (TaskBarIcon::OnExitMenuItemSelected))->Enable (!Busy && Frame->CanExit());
 #endif
 				return popup.release();
 			}
@@ -634,13 +649,9 @@ namespace VeraCrypt
 		try
 		{
 			MountOptions mountOptions (GetPreferences().DefaultMountOptions);
-			if (CmdLine->ArgTrueCryptMode)
-			{
-				mountOptions.TrueCryptMode = CmdLine->ArgTrueCryptMode;
-			}
 			if (CmdLine->ArgHash)
 			{
-				mountOptions.Kdf = Pkcs5Kdf::GetAlgorithm (*CmdLine->ArgHash, mountOptions.TrueCryptMode);
+				mountOptions.Kdf = Pkcs5Kdf::GetAlgorithm (*CmdLine->ArgHash);
 			}
 			if (CmdLine->ArgPim > 0)
 			{
@@ -663,19 +674,15 @@ namespace VeraCrypt
 		try
 		{
 			MountOptions mountOptions (GetPreferences().DefaultMountOptions);
-			if (CmdLine->ArgTrueCryptMode)
-			{
-				mountOptions.TrueCryptMode = CmdLine->ArgTrueCryptMode;
-			}
 			if (CmdLine->ArgHash)
 			{
-				mountOptions.Kdf = Pkcs5Kdf::GetAlgorithm (*CmdLine->ArgHash, mountOptions.TrueCryptMode);
+				mountOptions.Kdf = Pkcs5Kdf::GetAlgorithm (*CmdLine->ArgHash);
 			}
 			if (CmdLine->ArgPim > 0)
 			{
 				mountOptions.Pim = CmdLine->ArgPim;
 			}
-
+			mountOptions.EMVSupportEnabled = GetPreferences().EMVSupportEnabled;
 			Gui->MountAllFavoriteVolumes (mountOptions);
 		}
 		catch (exception &e)
@@ -688,7 +695,7 @@ namespace VeraCrypt
 	{
 		if (!IsFreeSlotSelected())
 		{
-			Gui->ShowWarning (_("Please select a free drive slot from the list."));
+			Gui->ShowWarning (LangString["LINUX_SELECT_FREE_SLOT"]);
 			return;
 		}
 
@@ -698,18 +705,15 @@ namespace VeraCrypt
 		MountOptions mountOptions (GetPreferences().DefaultMountOptions);
 		mountOptions.SlotNumber = SelectedSlotNumber;
 		mountOptions.Path = GetSelectedVolumePath();
-		if (CmdLine->ArgTrueCryptMode)
-		{
-			mountOptions.TrueCryptMode = CmdLine->ArgTrueCryptMode;
-		}
 		if (CmdLine->ArgHash)
 		{
-			mountOptions.Kdf = Pkcs5Kdf::GetAlgorithm (*CmdLine->ArgHash, mountOptions.TrueCryptMode);
+			mountOptions.Kdf = Pkcs5Kdf::GetAlgorithm (*CmdLine->ArgHash);
 		}
 		if (CmdLine->ArgPim > 0)
 		{
 			mountOptions.Pim = CmdLine->ArgPim;
 		}
+        mountOptions.EMVSupportEnabled = GetPreferences().EMVSupportEnabled;
 
 		try
 		{
@@ -727,6 +731,7 @@ namespace VeraCrypt
 #ifdef TC_MACOSX
 		if (Gui->IsInBackgroundMode())
 			Gui->SetBackgroundMode (false);
+		EnsureVisible ();
 #endif
 		AboutDialog dialog (this);
 		dialog.ShowModal();
@@ -739,6 +744,7 @@ namespace VeraCrypt
 #ifdef TC_MACOSX
 		if (event.GetActive() && Gui->IsInBackgroundMode())
 			Gui->SetBackgroundMode (false);
+		EnsureVisible();
 #endif
 		event.Skip();
 	}
@@ -954,13 +960,9 @@ namespace VeraCrypt
 			SetVolumePath (favorite.Path);
 
 			MountOptions mountOptions (GetPreferences().DefaultMountOptions);
-			if (CmdLine->ArgTrueCryptMode)
-			{
-				mountOptions.TrueCryptMode = CmdLine->ArgTrueCryptMode;
-			}
 			if (CmdLine->ArgHash)
 			{
-				mountOptions.Kdf = Pkcs5Kdf::GetAlgorithm (*CmdLine->ArgHash, mountOptions.TrueCryptMode);
+				mountOptions.Kdf = Pkcs5Kdf::GetAlgorithm (*CmdLine->ArgHash);
 			}
 			if (CmdLine->ArgPim > 0)
 			{
@@ -1006,7 +1008,7 @@ namespace VeraCrypt
 				if (newMountedCount < mountedCount)
 				{
 					if (newMountedCount == 0 && GetPreferences().DisplayMessageAfterHotkeyDismount)
-						Gui->ShowInfo ("MOUNTED_VOLUMES_DISMOUNTED");
+						Gui->ShowInfo ("MOUNTED_VOLUMES_UNMOUNTED");
 					else if (GetPreferences().BeepAfterHotkeyMountDismount)
 						MessageBeep((UINT) -1);
 				}
@@ -1022,7 +1024,7 @@ namespace VeraCrypt
 				Gui->DismountAllVolumes (true, true);
 
 				if (mounted && GetPreferences().DisplayMessageAfterHotkeyDismount)
-					Gui->ShowInfo ("VOLUMES_DISMOUNTED_CACHE_WIPED");
+					Gui->ShowInfo ("VOLUMES_UNMOUNTED_CACHE_WIPED");
 				else if (mounted && GetPreferences().BeepAfterHotkeyMountDismount)
 					MessageBeep((UINT) -1);
 
@@ -1070,6 +1072,17 @@ namespace VeraCrypt
 #endif
 		PreferencesDialog dialog (this);
 		dialog.SelectPage (dialog.HotkeysPage);
+		dialog.ShowModal();
+	}
+
+	void MainFrame::OnLanguageMenuItemSelected (wxCommandEvent& event)
+	{
+#ifdef TC_MACOSX
+		if (Gui->IsInBackgroundMode())
+			Gui->SetBackgroundMode (false);
+#endif
+		PreferencesDialog dialog (this);
+		dialog.SelectPage (dialog.LanguagesPage);
 		dialog.ShowModal();
 	}
 
@@ -1136,12 +1149,12 @@ namespace VeraCrypt
 		wxMenu popup;
 		if (IsMountedSlotSelected())
 		{
-			Gui->AppendToMenu (popup, LangString["DISMOUNT"], this, wxCommandEventHandler (MainFrame::OnDismountVolumeMenuItemSelected));
+			Gui->AppendToMenu (popup, LangString["UNMOUNT"], this, wxCommandEventHandler (MainFrame::OnDismountVolumeMenuItemSelected));
 			Gui->AppendToMenu (popup, LangString["OPEN"], this, wxCommandEventHandler (MainFrame::OnOpenVolumeMenuItemSelected));
-			Gui->AppendToMenu (popup, _("Deselect"), this, wxCommandEventHandler (MainFrame::OnClearSlotSelectionMenuItemSelected));
+			Gui->AppendToMenu (popup, LangString["LINUX_DESELECT"], this, wxCommandEventHandler (MainFrame::OnClearSlotSelectionMenuItemSelected));
 
 			popup.AppendSeparator();
-			Gui->AppendToMenu (popup, _("Add to Favorites..."), this, wxCommandEventHandler (MainFrame::OnAddToFavoritesMenuItemSelected));
+			Gui->AppendToMenu (popup, LangString["IDPM_ADD_TO_FAVORITES"], this, wxCommandEventHandler (MainFrame::OnAddToFavoritesMenuItemSelected));
 
 			popup.AppendSeparator();
 			Gui->AppendToMenu (popup, LangString["IDPM_CHECK_FILESYS"], this, wxCommandEventHandler (MainFrame::OnCheckFilesystemMenuItemSelected));
@@ -1154,7 +1167,7 @@ namespace VeraCrypt
 		}
 		else if (IsFreeSlotSelected())
 		{
-			Gui->AppendToMenu (popup, _("Mount Volume"), this, wxCommandEventHandler (MainFrame::OnMountVolumeMenuItemSelected));
+			Gui->AppendToMenu (popup, LangString["IDM_MOUNT_VOLUME"], this, wxCommandEventHandler (MainFrame::OnMountVolumeMenuItemSelected));
 
 			popup.AppendSeparator();
 
@@ -1163,7 +1176,7 @@ namespace VeraCrypt
 
 			popup.AppendSeparator();
 
-			Gui->AppendToMenu (popup, _("Deselect"), this, wxCommandEventHandler (MainFrame::OnClearSlotSelectionMenuItemSelected));
+			Gui->AppendToMenu (popup, LangString["LINUX_DESELECT"], this, wxCommandEventHandler (MainFrame::OnClearSlotSelectionMenuItemSelected));
 
 			PopupMenu (&popup);
 		}
@@ -1431,7 +1444,7 @@ namespace VeraCrypt
 #if defined(TC_UNIX) && !defined(TC_MACOSX)
 			try
 			{
-				byte buf[128];
+				uint8 buf[128];
 				if (read (ShowRequestFifo, buf, sizeof (buf)) > 0 && Gui->IsInBackgroundMode())
 					Gui->SetBackgroundMode (false);
 			}
@@ -1478,21 +1491,21 @@ namespace VeraCrypt
 
 		wxMenu popup;
 
-		Gui->AppendToMenu (popup, _("Change Volume Password..."), this, wxCommandEventHandler (MainFrame::OnChangePasswordMenuItemSelected));
+		Gui->AppendToMenu (popup, LangString["IDM_CHANGE_PASSWORD"], this, wxCommandEventHandler (MainFrame::OnChangePasswordMenuItemSelected));
 
 		popup.AppendSeparator ();
 
-		Gui->AppendToMenu (popup, _("Add/Remove Keyfiles to/from Volume..."), this, wxCommandEventHandler (MainFrame::OnChangeKeyfilesMenuItemSelected));
-		Gui->AppendToMenu (popup, _("Remove All Keyfiles from Volume..."), this, wxCommandEventHandler (MainFrame::OnRemoveKeyfilesMenuItemSelected));
+		Gui->AppendToMenu (popup, LangString["IDM_ADD_REMOVE_VOL_KEYFILES"], this, wxCommandEventHandler (MainFrame::OnChangeKeyfilesMenuItemSelected));
+		Gui->AppendToMenu (popup, LangString["IDM_REMOVE_ALL_KEYFILES_FROM_VOL"], this, wxCommandEventHandler (MainFrame::OnRemoveKeyfilesMenuItemSelected));
 
 		popup.AppendSeparator ();
 
-		Gui->AppendToMenu (popup, _("Change Header Key Derivation Algorithm..."), this, wxCommandEventHandler (MainFrame::OnChangePkcs5PrfMenuItemSelected));
+		Gui->AppendToMenu (popup, LangString["IDM_CHANGE_SYS_HEADER_KEY_DERIV_ALGO"], this, wxCommandEventHandler (MainFrame::OnChangePkcs5PrfMenuItemSelected));
 
 		popup.AppendSeparator ();
 
-		Gui->AppendToMenu (popup, _("Backup Volume Header..."), this, wxCommandEventHandler (MainFrame::OnBackupVolumeHeadersMenuItemSelected));
-		Gui->AppendToMenu (popup, _("Restore Volume Header..."), this, wxCommandEventHandler (MainFrame::OnRestoreVolumeHeaderMenuItemSelected));
+		Gui->AppendToMenu (popup, LangString["IDM_BACKUP_VOL_HEADER"], this, wxCommandEventHandler (MainFrame::OnBackupVolumeHeadersMenuItemSelected));
+		Gui->AppendToMenu (popup, LangString["IDM_RESTORE_VOL_HEADER"], this, wxCommandEventHandler (MainFrame::OnRestoreVolumeHeaderMenuItemSelected));
 
 		PopupMenu (&popup, VolumeToolsButton->GetPosition().x + 2, VolumeToolsButton->GetPosition().y + 2);
 	}
@@ -1552,6 +1565,32 @@ namespace VeraCrypt
 		}
 	}
 
+#ifdef HAVE_INDICATORS
+	void MainFrame::SetBusy (bool busy)
+	{
+		gtk_widget_set_sensitive(indicator_item_mountfavorites, !busy);
+		gtk_widget_set_sensitive(indicator_item_dismountall, !busy);
+		gtk_widget_set_sensitive(indicator_item_prefs, !busy);
+		gtk_widget_set_sensitive(indicator_item_exit, !busy /*&& CanExit()*/);
+	}
+
+	static void IndicatorOnShowHideMenuItemSelected (GtkWidget *widget, MainFrame *self) { Gui->SetBackgroundMode (!Gui->IsInBackgroundMode()); }
+	static void IndicatorOnMountAllFavoritesMenuItemSelected (GtkWidget *widget, MainFrame *self) { self->SetBusy(true); self->MountAllFavorites (); self->SetBusy(false); }
+	static void IndicatorOnDismountAllMenuItemSelected (GtkWidget *widget, MainFrame *self) { self->SetBusy(true); Gui->DismountAllVolumes(); self->SetBusy(false); }
+	static void IndicatorOnPreferencesMenuItemSelected (GtkWidget *widget, MainFrame *self) {
+		self->SetBusy(true);
+		PreferencesDialog dialog (self);
+		dialog.ShowModal();
+		self->SetBusy(false);
+	}
+	static void IndicatorOnExitMenuItemSelected (GtkWidget *widget, MainFrame *self) {
+		self->SetBusy(true);
+		if (Core->GetMountedVolumes().empty() || Gui->AskYesNo (LangString ["CONFIRM_EXIT"], false, true))
+			self->Close (true);
+		self->SetBusy(false);
+	}
+
+#endif
 	void MainFrame::ShowTaskBarIcon (bool show)
 	{
 		if (!show && mTaskBarIcon->IsIconInstalled())
@@ -1561,7 +1600,46 @@ namespace VeraCrypt
 		else if (show && !mTaskBarIcon->IsIconInstalled())
 		{
 #ifndef TC_MACOSX
+#ifndef HAVE_INDICATORS
 			mTaskBarIcon->SetIcon (Resources::GetVeraCryptIcon(), L"VeraCrypt");
+#endif
+#endif
+#ifdef HAVE_INDICATORS
+			if (indicator == NULL) {
+				indicator = app_indicator_new ("veracrypt", "veracrypt", APP_INDICATOR_CATEGORY_APPLICATION_STATUS);
+				app_indicator_set_status (indicator, APP_INDICATOR_STATUS_ACTIVE);
+
+				GtkWidget *menu = gtk_menu_new();
+
+				indicator_item_showhide = gtk_menu_item_new_with_label (LangString[Gui->IsInBackgroundMode() ? "SHOW_TC" : "HIDE_TC"].mb_str());
+				gtk_menu_shell_append (GTK_MENU_SHELL (menu), indicator_item_showhide);
+				g_signal_connect (indicator_item_showhide, "activate", G_CALLBACK (IndicatorOnShowHideMenuItemSelected), this);
+
+				gtk_menu_shell_append (GTK_MENU_SHELL (menu), gtk_separator_menu_item_new());
+
+				indicator_item_mountfavorites = gtk_menu_item_new_with_label (LangString["IDM_MOUNT_FAVORITE_VOLUMES"]);
+				gtk_menu_shell_append (GTK_MENU_SHELL (menu), indicator_item_mountfavorites);
+				g_signal_connect (indicator_item_mountfavorites, "activate", G_CALLBACK (IndicatorOnMountAllFavoritesMenuItemSelected), this);
+
+				indicator_item_dismountall = gtk_menu_item_new_with_label (LangString["HK_UNMOUNT_ALL"]);
+				gtk_menu_shell_append (GTK_MENU_SHELL (menu), indicator_item_dismountall);
+				g_signal_connect (indicator_item_dismountall, "activate", G_CALLBACK (IndicatorOnDismountAllMenuItemSelected), this);
+
+				gtk_menu_shell_append (GTK_MENU_SHELL (menu), gtk_separator_menu_item_new());
+
+				indicator_item_prefs = gtk_menu_item_new_with_label (LangString["IDM_PREFERENCES"]);
+				gtk_menu_shell_append (GTK_MENU_SHELL (menu), indicator_item_prefs);
+				g_signal_connect (indicator_item_prefs, "activate", G_CALLBACK (IndicatorOnPreferencesMenuItemSelected), this);
+
+				gtk_menu_shell_append (GTK_MENU_SHELL (menu), gtk_separator_menu_item_new());
+
+				indicator_item_exit = gtk_menu_item_new_with_label (LangString["EXIT"]);
+				gtk_menu_shell_append (GTK_MENU_SHELL (menu), indicator_item_exit);
+				g_signal_connect (indicator_item_exit, "activate", G_CALLBACK (IndicatorOnExitMenuItemSelected), this);
+
+				gtk_widget_show_all (menu);
+				app_indicator_set_menu (indicator, GTK_MENU (menu));
+			}
 #endif
 		}
 	}
@@ -1582,7 +1660,7 @@ namespace VeraCrypt
 	{
 		bool mounted = IsMountedSlotSelected();
 
-		VolumeButton->SetLabel (mounted ? LangString["DISMOUNT"] : wxString (_("Mount")));
+		VolumeButton->SetLabel (mounted ? LangString["UNMOUNT_BUTTON"] : LangString["MOUNT_BUTTON"]);
 		VolumePropertiesButton->Enable (mounted);
 
 		DismountVolumeMenuItem->Enable (mounted);
@@ -1609,7 +1687,6 @@ namespace VeraCrypt
 		}
 
 		VolumeInfoList protectionTriggeredVolumes;
-		SlotListCtrl->SetColumnWidth(0, wxLIST_AUTOSIZE);
 
 		// Update list
 		long prevItemIndex = -1;
@@ -1631,7 +1708,7 @@ namespace VeraCrypt
 #endif
 				fields[ColumnPath] = volume->Path;
 				fields[ColumnSize] = Gui->SizeToString (volume->Size);
-				fields[ColumnType] = Gui->VolumeTypeToString (volume->Type, volume->TrueCryptMode, volume->Protection);
+				fields[ColumnType] = Gui->VolumeTypeToString (volume->Type, volume->Protection);
 
 				if (volume->HiddenVolumeProtectionTriggered)
 				{
@@ -1641,7 +1718,7 @@ namespace VeraCrypt
 				bool slotUpdated = false;
 				if (itemIndex == -1)
 				{
-					Gui->InsertToListCtrl (SlotListCtrl, ++prevItemIndex, fields, 0, (void *) volume->SlotNumber);
+					Gui->InsertToListCtrl (SlotListCtrl, ++prevItemIndex, fields, 0, (void *)(intptr_t) volume->SlotNumber);
 					OnListItemInserted (prevItemIndex);
 
 					listChanged |= true;
@@ -1676,7 +1753,7 @@ namespace VeraCrypt
 				{
 					if (itemIndex == -1)
 					{
-						Gui->InsertToListCtrl (SlotListCtrl, ++prevItemIndex, fields, 0, (void *) slotNumber);
+						Gui->InsertToListCtrl (SlotListCtrl, ++prevItemIndex, fields, 0, (void *)(intptr_t) slotNumber);
 						OnListItemInserted (prevItemIndex);
 						listChanged |= true;
 					}
@@ -1695,8 +1772,10 @@ namespace VeraCrypt
 			}
 		}
 
-		if (listChanged)
+		if (listChanged) {
+			SlotListCtrl->SetColumnWidth(0, wxLIST_AUTOSIZE);
 			OnListChanged();
+		}
 
 		foreach (shared_ptr <VolumeInfo> volume, protectionTriggeredVolumes)
 			OnHiddenVolumeProtectionTriggered (volume);
@@ -1724,4 +1803,11 @@ namespace VeraCrypt
 		Core->WipePasswordCache();
 		UpdateWipeCacheButton();
 	}
+	
+#ifdef TC_MACOSX
+	void MainFrame::OnMoveHandler(wxMoveEvent& event)
+	{
+		EnsureVisible (true);
+	}
+#endif
 }

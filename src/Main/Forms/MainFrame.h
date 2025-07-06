@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -13,8 +13,17 @@
 #ifndef TC_HEADER_Main_Forms_MainFrame
 #define TC_HEADER_Main_Forms_MainFrame
 
+#ifdef HAVE_INDICATORS
+#define GSocket GlibGSocket
+#include <libayatana-appindicator/app-indicator.h>
+#undef GSocket
+#endif
+
 #include "Forms.h"
 #include "ChangePasswordDialog.h"
+#ifdef TC_MACOSX
+#include <wx/display.h>
+#endif
 
 namespace VeraCrypt
 {
@@ -35,6 +44,18 @@ namespace VeraCrypt
 		static FilePath GetShowRequestFifoPath () { return Application::GetConfigFilePath (L".show-request-queue", true); }
 #endif
 
+		void MountAllFavorites ();
+
+#ifdef HAVE_INDICATORS
+		AppIndicator *indicator;
+		GtkWidget *indicator_item_showhide;
+		GtkWidget *indicator_item_mountfavorites;
+		GtkWidget *indicator_item_dismountall;
+		GtkWidget *indicator_item_prefs;
+		GtkWidget *indicator_item_exit;
+		void SetBusy (bool busy);
+
+#endif
 	protected:
 		enum
 		{
@@ -63,12 +84,12 @@ namespace VeraCrypt
 		void InitMessageFilter ();
 		void InitPreferences ();
 		void InitTaskBarIcon ();
+		void InitWindowPrivacy();
 		bool IsFreeSlotSelected () const { return SlotListCtrl->GetSelectedItemCount() == 1 && Gui->GetListCtrlSubItemText (SlotListCtrl, SelectedItemIndex, ColumnPath).empty(); }
 		bool IsMountedSlotSelected () const { return SlotListCtrl->GetSelectedItemCount() == 1 && !Gui->GetListCtrlSubItemText (SlotListCtrl, SelectedItemIndex, ColumnPath).empty(); }
 		void LoadFavoriteVolumes ();
 		void LoadPreferences ();
 		void MountAllDevices ();
-		void MountAllFavorites ();
 		void MountVolume ();
 		void OnAboutMenuItemSelected (wxCommandEvent& event);
 		void OnQuit(wxCommandEvent& event) { Close(true); }
@@ -108,6 +129,7 @@ namespace VeraCrypt
 		void OnHiddenVolumeProtectionTriggered (shared_ptr <VolumeInfo> protectedVolume);
 		void OnHotkey (wxKeyEvent& event);
 		void OnHotkeysMenuItemSelected (wxCommandEvent& event);
+		void OnLanguageMenuItemSelected (wxCommandEvent& event);
 		void OnLegalNoticesMenuItemSelected (wxCommandEvent& event);
 		void OnListChanged ();
 		void OnListItemActivated (wxListEvent& event);
@@ -162,6 +184,35 @@ namespace VeraCrypt
 		void UpdateWipeCacheButton ();
 		void WipeCache ();
 
+#ifdef TC_MACOSX
+		void OnMoveHandler(wxMoveEvent& event);
+
+        void EnsureVisible(bool bOnlyHeadingBar = false)
+        {
+        	wxDisplay display (this);
+        	wxRect displayRect = display.GetClientArea();
+        	    
+        	bool bMove = false;
+        	wxPoint p = GetScreenPosition();
+        	wxRect r = GetRect ();
+        	wxRect rc = GetClientRect ();
+        	int titleBarHeight = r.height - rc.height; 	
+        	
+        	if (!bOnlyHeadingBar && (p.x < displayRect.x))
+        		p.x = 0, bMove = true;
+        	if (p.y < displayRect.y)
+        		p.y = displayRect.y, bMove = true;
+        	if (!bOnlyHeadingBar && (p.x + r.width > displayRect.x + displayRect.width))
+        		p.x = displayRect.x + displayRect.width - r.width, bMove = true;
+        	if (!bOnlyHeadingBar && (p.y + r.height > displayRect.y + displayRect.height))
+        		p.y = displayRect.y + displayRect.height - r.height, bMove = true;
+        	if (bOnlyHeadingBar && (p.y > (displayRect.y + displayRect.height - titleBarHeight)))
+        		p.y = displayRect.y + displayRect.height - titleBarHeight, bMove = true;
+        	if (bMove)
+        		Move (p);
+        }
+#endif
+
 		struct VolumeActivityMapEntry
 		{
 			VolumeActivityMapEntry () { }
@@ -182,8 +233,8 @@ namespace VeraCrypt
 		map <int, FavoriteVolume> FavoriteVolumesMenuMap;
 		bool ListItemRightClickEventPending;
 		VolumeInfoList MountedVolumes;
-		auto_ptr <wxTaskBarIcon> mTaskBarIcon;
-		auto_ptr <wxTimer> mTimer;
+		unique_ptr <wxTaskBarIcon> mTaskBarIcon;
+		unique_ptr <wxTimer> mTimer;
 		long SelectedItemIndex;
 		VolumeSlotNumber SelectedSlotNumber;
 		int ShowRequestFifo;

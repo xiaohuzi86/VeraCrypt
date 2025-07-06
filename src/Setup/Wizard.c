@@ -6,7 +6,7 @@
  Encryption for the Masses 2.02a, which is Copyright (c) 1998-2000 Paul Le Roux
  and which is governed by the 'License Agreement for Encryption for the Masses'
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages. */
@@ -45,8 +45,8 @@ enum wizard_pages
 
 HWND hCurPage = NULL;		/* Handle to current wizard page */
 int nCurPageNo = -1;		/* The current wizard page */
-wchar_t WizardDestInstallPath [TC_MAX_PATH];
-wchar_t WizardDestExtractPath [TC_MAX_PATH];
+wchar_t WizardDestInstallPath [TC_MAX_PATH] = { 0 };
+wchar_t WizardDestExtractPath [TC_MAX_PATH] = { 0 };
 wchar_t SelfFile [TC_MAX_PATH];
 
 HBITMAP hbmWizardBitmapRescaled = NULL;
@@ -60,6 +60,7 @@ BOOL bStartExtraction = FALSE;
 BOOL bInProgress = FALSE;
 BOOL bPromptTutorial = FALSE;
 BOOL bPromptReleaseNotes = FALSE;
+BOOL bPromptFastStartup = FALSE;
 
 extern BOOL bUserSetLanguage;
 
@@ -240,6 +241,8 @@ static int GetDonVal (int minVal, int maxVal)
 BOOL CALLBACK PageDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	static char PageDebugId[128];
+	static HWND hDisableMemProtectionTooltipWnd = NULL;
+	static HWND hDisableScreenProtectionTooltipWnd = NULL;
 	WORD lw = LOWORD (wParam);
 	WORD hw = HIWORD (wParam);
 
@@ -467,9 +470,21 @@ BOOL CALLBACK PageDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 					EnableWindow (GetDlgItem (hwndDlg, IDC_SYSTEM_RESTORE), FALSE);
 				}
 
+				hDisableMemProtectionTooltipWnd = CreateToolTip (IDC_DISABLE_MEMORY_PROTECTION, hwndDlg, "DISABLE_MEMORY_PROTECTION_WARNING");
+				// make IDC_DISABLE_MEMORY_PROTECTION control fit the text so that the tooltip is shown only when mouse is over the text
+				AccommodateCheckBoxTextWidth(hwndDlg, IDC_DISABLE_MEMORY_PROTECTION);
+				// make the help button adjacent to the checkbox
+				MakeControlsContiguous(hwndDlg, IDC_DISABLE_MEMORY_PROTECTION, IDC_DISABLE_MEMORY_PROTECTION_HELP);
+
+				hDisableScreenProtectionTooltipWnd = CreateToolTip (IDC_DISABLE_SCREEN_PROTECTION, hwndDlg, "DISABLE_SCREEN_PROTECTION_HELP");
+				// make the help button adjacent to the checkbox
+				AccommodateCheckBoxTextWidth(hwndDlg, IDC_DISABLE_SCREEN_PROTECTION);
+
 				SetCheckBox (hwndDlg, IDC_ALL_USERS, bForAllUsers);
 				SetCheckBox (hwndDlg, IDC_FILE_TYPE, bRegisterFileExt);
 				SetCheckBox (hwndDlg, IDC_PROG_GROUP, bAddToStartMenu);
+				SetCheckBox (hwndDlg, IDC_DISABLE_MEMORY_PROTECTION, bDisableMemoryProtection);
+				SetCheckBox (hwndDlg, IDC_DISABLE_SCREEN_PROTECTION, bDisableScreenProtection);
 				SetCheckBox (hwndDlg, IDC_DESKTOP_ICON, bDesktopIcon);
 
 				SetWindowTextW (GetDlgItem (GetParent (hwndDlg), IDC_NEXT), GetString (bUpgrade ? "UPGRADE" : "INSTALL"));
@@ -674,7 +689,7 @@ BOOL CALLBACK PageDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 			switch (lw)
 			{
 			case IDC_BROWSE:
-				if (BrowseDirectories (hwndDlg, "SELECT_DEST_DIR", WizardDestExtractPath))
+				if (BrowseDirectories (hwndDlg, "SELECT_DEST_DIR", WizardDestExtractPath, WizardDestExtractPath))
 				{
 					if (WizardDestExtractPath [wcslen(WizardDestExtractPath)-1] != L'\\')
 					{
@@ -695,7 +710,7 @@ BOOL CALLBACK PageDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 			switch (lw)
 			{
 			case IDC_BROWSE:
-				if (BrowseDirectories (hwndDlg, "SELECT_DEST_DIR", WizardDestInstallPath))
+				if (BrowseDirectories (hwndDlg, "SELECT_DEST_DIR", WizardDestInstallPath, WizardDestInstallPath))
 				{
 					if (WizardDestInstallPath [wcslen(WizardDestInstallPath)-1] != L'\\')
 					{
@@ -711,6 +726,26 @@ BOOL CALLBACK PageDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 
 			case IDC_ALL_USERS:
 				bForAllUsers = IsButtonChecked (GetDlgItem (hCurPage, IDC_ALL_USERS));
+				return 1;
+
+			case IDC_DISABLE_MEMORY_PROTECTION:
+				bDisableMemoryProtection = IsButtonChecked (GetDlgItem (hCurPage, IDC_DISABLE_MEMORY_PROTECTION));
+				if (bDisableMemoryProtection)
+				{
+					Warning ("DISABLE_MEMORY_PROTECTION_WARNING", hwndDlg);
+				}
+				return 1;
+
+			case IDC_DISABLE_MEMORY_PROTECTION_HELP:
+				Applink("memoryprotection");
+				return 1;
+
+			case IDC_DISABLE_SCREEN_PROTECTION:
+				bDisableScreenProtection = IsButtonChecked (GetDlgItem (hCurPage, IDC_DISABLE_SCREEN_PROTECTION));
+				if (bDisableScreenProtection)
+				{
+					Warning ("DISABLE_SCREEN_PROTECTION_WARNING", hwndDlg);
+				}
 				return 1;
 
 			case IDC_FILE_TYPE:
@@ -787,6 +822,22 @@ BOOL CALLBACK PageDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 			ReleaseDC (hCurPage, hdc);
 		}
 		return 0;
+
+	case WM_DESTROY:
+	
+		if (hDisableMemProtectionTooltipWnd != NULL)
+		{
+			DestroyWindow (hDisableMemProtectionTooltipWnd);
+			hDisableMemProtectionTooltipWnd = NULL;
+		}
+
+		if (hDisableScreenProtectionTooltipWnd != NULL)
+		{
+			DestroyWindow (hDisableScreenProtectionTooltipWnd);
+			hDisableScreenProtectionTooltipWnd = NULL;
+		}
+
+		break;
 
 	}
 
@@ -874,12 +925,16 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 
 			SendMessage (GetDlgItem (hwndDlg, IDC_BOX_TITLE), WM_SETFONT, (WPARAM) hUserBoldFont, (LPARAM) TRUE);
 #ifndef PORTABLE
-			SetWindowText (hwndDlg, L"VeraCrypt Setup " _T(VERSION_STRING));
+			SetWindowText (hwndDlg, L"VeraCrypt Setup " _T(VERSION_STRING) _T(VERSION_STRING_SUFFIX));
 #else
-			SetWindowText (hwndDlg, L"VeraCrypt Portable " _T(VERSION_STRING));
+			SetWindowText (hwndDlg, L"VeraCrypt Portable " _T(VERSION_STRING) _T(VERSION_STRING_SUFFIX));
 #endif
 
 			DonColorSchemeId = GetDonVal (2, 9);
+
+			// get the initial value of bDisableMemoryProtection and bDisableScreenProtection by reading the registry
+			bDisableMemoryProtection = bOriginalDisableMemoryProtection = ReadMemoryProtectionConfig()? FALSE : TRUE;
+			bDisableScreenProtection = bOriginalDisableScreenProtection = ReadScreenProtectionConfig()? FALSE : TRUE;
 
 			if (bDevm)
 			{
@@ -944,22 +999,6 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 				}
 				bLicenseAccepted = TRUE;
 				EnableWindow (GetDlgItem (hwndDlg, IDHELP), TRUE);
-
-				if (nCurrentOS == WIN_2000)
-				{
-					WarningDirect (L"Warning: Please note that this may be the last version of VeraCrypt that supports Windows 2000. If you want to be able to upgrade to future versions of VeraCrypt (which is highly recommended), you will need to upgrade to Windows XP or a later version of Windows.\n\nNote: Microsoft stopped issuing security updates for Windows 2000 to the general public on 7/13/2010 (the last non-security update for Windows 2000 was issued to the general public in 2005).", hwndDlg);
-
-
-					HKEY hkey;
-
-					if (RegOpenKeyEx (HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Updates\\Windows 2000\\SP5\\Update Rollup 1", 0, KEY_READ, &hkey) != ERROR_SUCCESS)
-					{
-						ErrorDirect (L"VeraCrypt requires Update Rollup 1 for Windows 2000 SP4 to be installed.\n\nFor more information, see http://support.microsoft.com/kb/891861", hwndDlg);
-						AbortProcessSilent ();
-					}
-
-					RegCloseKey (hkey);
-				}
 			}
 #ifndef PORTABLE
 			else if (nCurPageNo == WIZARD_MODE_PAGE)
@@ -977,6 +1016,13 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 					bExtractOnly = TRUE;
 					nCurPageNo = EXTRACTION_OPTIONS_PAGE - 1;
 				}
+#ifdef VC_EFI_CUSTOM_MODE
+				else if (bUpgrade && !CheckSecureBootCompatibility (hwndDlg))
+				{
+					WarningDirect(L"This installer version supports only custom EFI SecureBoot.\nPlease use regular installer to update your system", hwndDlg);
+					return 1;
+				}
+#endif
 			}
 #endif
 			else if (nCurPageNo == EXTRACTION_OPTIONS_PAGE)
@@ -1244,6 +1290,15 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 				*/
 				bPromptTutorial = FALSE;
 			}
+
+			if (bPromptFastStartup
+				&& AskWarnYesNo ("CONFIRM_DISABLE_FAST_STARTUP", hwndDlg) == IDYES)
+			{
+				WriteLocalMachineRegistryDword (L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power", L"HiberbootEnabled", 0);
+				bRestartRequired = TRUE;
+			}
+
+			bPromptFastStartup = FALSE;
 
 			if (bRestartRequired
 				&& AskYesNo (bUpgrade ? "UPGRADE_OK_REBOOT_REQUIRED" : "CONFIRM_RESTART", hwndDlg) == IDYES)

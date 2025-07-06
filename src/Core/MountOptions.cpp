@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -52,7 +52,6 @@ namespace VeraCrypt
 		TC_CLONE (SharedAccessAllowed);
 		TC_CLONE (SlotNumber);
 		TC_CLONE (UseBackupHeaders);
-		TC_CLONE (TrueCryptMode);
 	}
 
 	void MountOptions::Deserialize (shared_ptr <Stream> stream)
@@ -101,14 +100,12 @@ namespace VeraCrypt
 		sr.Deserialize ("SlotNumber", SlotNumber);
 		sr.Deserialize ("UseBackupHeaders", UseBackupHeaders);
 
-		sr.Deserialize ("TrueCryptMode", TrueCryptMode);
-
 		try
 		{
 			if (!sr.DeserializeBool ("KdfNull"))
 			{
 				sr.Deserialize ("Kdf", nameValue);
-				Kdf = Pkcs5Kdf::GetAlgorithm (nameValue, TrueCryptMode);
+				Kdf = Pkcs5Kdf::GetAlgorithm (nameValue);
 			}
 		}
 		catch(...) {}
@@ -118,7 +115,7 @@ namespace VeraCrypt
 			if (!sr.DeserializeBool ("ProtectionKdfNull"))
 			{
 				sr.Deserialize ("ProtectionKdf", nameValue);
-				ProtectionKdf = Pkcs5Kdf::GetAlgorithm (nameValue, TrueCryptMode);
+				ProtectionKdf = Pkcs5Kdf::GetAlgorithm (nameValue);
 			}
 		}
 		catch(...) {}
@@ -166,8 +163,6 @@ namespace VeraCrypt
 		sr.Serialize ("SharedAccessAllowed", SharedAccessAllowed);
 		sr.Serialize ("SlotNumber", SlotNumber);
 		sr.Serialize ("UseBackupHeaders", UseBackupHeaders);
-
-		sr.Serialize ("TrueCryptMode", TrueCryptMode);
 
 		sr.Serialize ("KdfNull", Kdf == nullptr);
 		if (Kdf)

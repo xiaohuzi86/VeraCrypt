@@ -4,7 +4,7 @@
  by the TrueCrypt License 3.0.
 
  Modifications and additions to the original source code (contained in this file)
- and all other portions of this file are Copyright (c) 2013-2017 IDRIX
+ and all other portions of this file are Copyright (c) 2013-2025 AM Crypto
  and are governed by the Apache License 2.0 the full text of which is
  contained in the file License.txt included in VeraCrypt binary and source
  code distribution packages.
@@ -13,6 +13,7 @@
 #include "CoreService.h"
 #include <fcntl.h>
 #include <sys/wait.h>
+#include <stdio.h>
 #include "Platform/FileStream.h"
 #include "Platform/MemoryStream.h"
 #include "Platform/Serializable.h"
@@ -27,9 +28,9 @@
 namespace VeraCrypt
 {
 	template <class T>
-	auto_ptr <T> CoreService::GetResponse ()
+	unique_ptr <T> CoreService::GetResponse ()
 	{
-		auto_ptr <Serializable> deserializedObject (Serializable::DeserializeNew (ServiceOutputStream));
+		unique_ptr <Serializable> deserializedObject (Serializable::DeserializeNew (ServiceOutputStream));
 
 		Exception *deserializedException = dynamic_cast <Exception*> (deserializedObject.get());
 		if (deserializedException)
@@ -38,7 +39,7 @@ namespace VeraCrypt
 		if (dynamic_cast <T *> (deserializedObject.get()) == nullptr)
 			throw ParameterIncorrect (SRC_POS);
 
-		return auto_ptr <T> (dynamic_cast <T *> (deserializedObject.release()));
+		return unique_ptr <T> (dynamic_cast <T *> (deserializedObject.release()));
 	}
 
 	void CoreService::ProcessElevatedRequests ()
@@ -56,7 +57,7 @@ namespace VeraCrypt
 				// Wait for sync code
 				while (true)
 				{
-					byte b;
+					uint8 b;
 					throw_sys_if (read (STDIN_FILENO, &b, 1) != 1);
 					if (b != 0x00)
 						continue;
@@ -89,7 +90,7 @@ namespace VeraCrypt
 	{
 		try
 		{
-			Core = CoreDirect;
+			Core = move_ptr(CoreDirect);
 
 			shared_ptr <Stream> inputStream (new FileStream (inputFD != -1 ? inputFD : InputPipe->GetReadFD()));
 			shared_ptr <Stream> outputStream (new FileStream (outputFD != -1 ? outputFD : OutputPipe->GetWriteFD()));
@@ -97,6 +98,11 @@ namespace VeraCrypt
 			while (true)
 			{
 				shared_ptr <CoreServiceRequest> request = Serializable::DeserializeNew <CoreServiceRequest> (inputStream);
+
+				// Update Core properties based on the received request
+				Core->SetUserEnvPATH (request->UserEnvPATH);
+				Core->ForceUseDummySudoPassword(request->UseDummySudoPassword);
+				Core->SetAllowInsecureMount(request->AllowInsecureMount);
 
 				try
 				{
@@ -277,23 +283,75 @@ namespace VeraCrypt
 	}
 
 	template <class T>
-	auto_ptr <T> CoreService::SendRequest (CoreServiceRequest &request)
+	unique_ptr <T> CoreService::SendRequest (CoreServiceRequest &request)
 	{
 		static Mutex mutex;
 		ScopeLock lock (mutex);
+
+		// Copy Core properties to the request so that they can be transferred to the elevated process
+		request.ApplicationExecutablePath = Core->GetApplicationExecutablePath();
+		request.UserEnvPATH = Core->GetUserEnvPATH();
+		request.UseDummySudoPassword = Core->GetUseDummySudoPassword();
+		request.AllowInsecureMount = Core->GetAllowInsecureMount();
 
 		if (request.RequiresElevation())
 		{
 			request.ElevateUserPrivileges = true;
 			request.FastElevation = !ElevatedServiceAvailable;
-			request.ApplicationExecutablePath = Core->GetApplicationExecutablePath();
-
+			
 			while (!ElevatedServiceAvailable)
 			{
+				//	Test if the user has an active "sudo" session.
+				bool authCheckDone = false;
+				if (!Core->GetUseDummySudoPassword ())
+				{	
+					// We are using -n to avoid prompting the user for a password.
+					// We are redirecting stderr to stdout and discarding both to avoid any output.
+					// This approach also works on newer macOS versions (12.0 and later).
+					std::string errorMsg;
+
+					string sudoAbsolutePath = Process::FindSystemBinary("sudo", errorMsg);
+					if (sudoAbsolutePath.empty())
+						throw SystemException(SRC_POS, errorMsg);
+
+					string trueAbsolutePath = Process::FindSystemBinary("true", errorMsg);
+					if (trueAbsolutePath.empty())
+						throw SystemException(SRC_POS, errorMsg);
+
+					std::string popenCommand = sudoAbsolutePath + " -n " + trueAbsolutePath + " > /dev/null 2>&1";	//	We redirect stderr to stdout (2>&1) to be able to catch the result of the command
+					FILE* pipe = popen(popenCommand.c_str(), "r");
+					if (pipe)
+					{
+						// We only care about the exit code  
+						char buf[128];  
+						while (!feof(pipe))  
+						{  
+							if (fgets(buf, sizeof(buf), pipe) == NULL)  
+								break;  
+						}  
+						int status = pclose(pipe);  
+						pipe = NULL;
+						
+						authCheckDone = true;  
+  
+						// If exit code != 0, user does NOT have an active session => request password  
+						if (status != 0)  
+						{  
+							(*AdminPasswordCallback)(request.AdminPassword);  
+						}
+					}
+					
+					if (authCheckDone)
+					{
+						//	Set to false to force the 'WarningEvent' to be raised in case of and elevation exception.
+						request.FastElevation = false;
+					}
+				}
+			
 				try
 				{
 					request.Serialize (ServiceInputStream);
-					auto_ptr <T> response (GetResponse <T>());
+					unique_ptr <T> response (GetResponse <T>());
 					ElevatedServiceAvailable = true;
 					return response;
 				}
@@ -306,7 +364,9 @@ namespace VeraCrypt
 					}
 
 					request.FastElevation = false;
-					(*AdminPasswordCallback) (request.AdminPassword);
+
+					if(!authCheckDone)
+						(*AdminPasswordCallback) (request.AdminPassword);
 				}
 			}
 		}
@@ -342,8 +402,8 @@ namespace VeraCrypt
 
 	void CoreService::StartElevated (const CoreServiceRequest &request)
 	{
-		auto_ptr <Pipe> inPipe (new Pipe());
-		auto_ptr <Pipe> outPipe (new Pipe());
+		unique_ptr <Pipe> inPipe (new Pipe());
+		unique_ptr <Pipe> outPipe (new Pipe());
 		Pipe errPipe;
 
 		int forkedPid = fork();
@@ -355,15 +415,38 @@ namespace VeraCrypt
 			{
 				try
 				{
+					// Throw exception if sudo is not found in secure locations
+					std::string errorMsg;
+					string sudoPath = Process::FindSystemBinary("sudo", errorMsg);
+					if (sudoPath.empty())
+						throw SystemException(SRC_POS, errorMsg);
+
+					string appPath = request.ApplicationExecutablePath;
+					// if appPath is empty or not absolute, use FindSystemBinary to get the full path of veracrpyt executable
+					if (appPath.empty() || appPath[0] != '/')
+					{
+						appPath = Process::FindSystemBinary("veracrypt", errorMsg);
+						if (appPath.empty())
+							throw SystemException(SRC_POS, errorMsg);
+					}
+
+#if defined(TC_LINUX)
+                    // AppImage specific handling:
+                    // If running from an AppImage, use the path to the AppImage file itself for sudo.
+                    const char* appImageEnv = getenv("APPIMAGE");
+
+                    if (Process::IsRunningUnderAppImage(appPath) && appImageEnv != NULL)
+					{
+						// The path to the AppImage file is stored in the APPIMAGE environment variable.
+						// We need to use this path for sudo to work correctly.
+                        appPath = appImageEnv;
+                    }
+#endif
 					throw_sys_if (dup2 (inPipe->GetReadFD(), STDIN_FILENO) == -1);
 					throw_sys_if (dup2 (outPipe->GetWriteFD(), STDOUT_FILENO) == -1);
 					throw_sys_if (dup2 (errPipe.GetWriteFD(), STDERR_FILENO) == -1);
 
-					string appPath = request.ApplicationExecutablePath;
-					if (appPath.empty())
-						appPath = "veracrypt";
-
-					const char *args[] = { "sudo", "-S", "-p", "", appPath.c_str(), TC_CORE_SERVICE_CMDLINE_OPTION, nullptr };
+					const char *args[] = { sudoPath.c_str(), "-S", "-p", "", appPath.c_str(), TC_CORE_SERVICE_CMDLINE_OPTION, nullptr };
 					execvp (args[0], ((char* const*) args));
 					throw SystemException (SRC_POS, args[0]);
 				}
@@ -396,6 +479,7 @@ namespace VeraCrypt
 		vector <char> adminPassword (request.AdminPassword.size() + 1);
 		int timeout = 6000;
 
+		//	'request.FastElevation' is always false under Linux / FreeBSD when "sudo -n" works properly
 		if (request.FastElevation)
 		{
 			string dummyPassword = "dummy\n";
@@ -409,9 +493,12 @@ namespace VeraCrypt
 			adminPassword[request.AdminPassword.size()] = '\n';
 		}
 
+#if defined(TC_LINUX )
+		Thread::Sleep (1000); // wait 1 second for the forked sudo to start
+#endif
 		if (write (inPipe->GetWriteFD(), &adminPassword.front(), adminPassword.size())) { } // Errors ignored
 
-		Memory::Erase (&adminPassword.front(), adminPassword.size());
+		burn (&adminPassword.front(), adminPassword.size());
 
 		throw_sys_if (fcntl (outPipe->GetReadFD(), F_SETFL, O_NONBLOCK) == -1);
 		throw_sys_if (fcntl (errPipe.GetReadFD(), F_SETFL, O_NONBLOCK) == -1);
@@ -457,6 +544,7 @@ namespace VeraCrypt
 				outPipe->Close();
 				errPipe.Close();
 
+				//	'request.FastElevation' is always false under Linux / FreeBSD
 				if (request.FastElevation)
 				{
 					// Prevent defunct process
@@ -483,12 +571,12 @@ namespace VeraCrypt
 
 		if (!errOutput.empty())
 		{
-			auto_ptr <Serializable> deserializedObject;
+			unique_ptr <Serializable> deserializedObject;
 			Exception *deserializedException = nullptr;
 
 			try
 			{
-				shared_ptr <Stream> stream (new MemoryStream (ConstBufferPtr ((byte *) &errOutput[0], errOutput.size())));
+				shared_ptr <Stream> stream (new MemoryStream (ConstBufferPtr ((uint8 *) &errOutput[0], errOutput.size())));
 				deserializedObject.reset (Serializable::DeserializeNew (stream));
 				deserializedException = dynamic_cast <Exception*> (deserializedObject.get());
 			}
@@ -520,11 +608,11 @@ namespace VeraCrypt
 		ServiceOutputStream = shared_ptr <Stream> (new FileStream (outPipe->GetReadFD()));
 
 		// Send sync code
-		byte sync[] = { 0, 0x11, 0x22 };
+		uint8 sync[] = { 0, 0x11, 0x22 };
 		ServiceInputStream->Write (ConstBufferPtr (sync, array_capacity (sync)));
 
-		AdminInputPipe = inPipe;
-		AdminOutputPipe = outPipe;
+		AdminInputPipe = move_ptr(inPipe);
+		AdminOutputPipe = move_ptr(outPipe);
 	}
 
 	void CoreService::Stop ()
@@ -535,11 +623,11 @@ namespace VeraCrypt
 
 	shared_ptr <GetStringFunctor> CoreService::AdminPasswordCallback;
 
-	auto_ptr <Pipe> CoreService::AdminInputPipe;
-	auto_ptr <Pipe> CoreService::AdminOutputPipe;
+	unique_ptr <Pipe> CoreService::AdminInputPipe;
+	unique_ptr <Pipe> CoreService::AdminOutputPipe;
 
-	auto_ptr <Pipe> CoreService::InputPipe;
-	auto_ptr <Pipe> CoreService::OutputPipe;
+	unique_ptr <Pipe> CoreService::InputPipe;
+	unique_ptr <Pipe> CoreService::OutputPipe;
 	shared_ptr <Stream> CoreService::ServiceInputStream;
 	shared_ptr <Stream> CoreService::ServiceOutputStream;
 

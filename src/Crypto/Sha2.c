@@ -10,7 +10,7 @@ and released into public domain.
 #include "Crypto/cpu.h"
 #include "Crypto/misc.h"
 
-#ifdef _UEFI
+#if defined(_UEFI) || defined(CRYPTOPP_DISABLE_ASM)
 #define NO_OPTIMIZED_VERSIONS
 #endif
 
@@ -27,7 +27,7 @@ extern "C"
 #endif
 	
 #if CRYPTOPP_BOOL_X64 || ((CRYPTOPP_BOOL_X86 || CRYPTOPP_BOOL_X32) && !defined (TC_MACOSX))
-	void sha512_compress_nayuki(uint_64t state[8], const uint_8t block[128]);
+	void VC_CDECL sha512_compress_nayuki(uint_64t state[8], const uint_8t block[128]);
 #endif
 #if defined(__cplusplus)
 }
@@ -306,10 +306,17 @@ extern "C"
 	void sha256_sse4(void *input_data, uint_32t digest[8], uint_64t num_blks);
 	void sha256_rorx(void *input_data, uint_32t digest[8], uint_64t num_blks);
 	void sha256_avx(void *input_data, uint_32t digest[8], uint_64t num_blks);
+#if CRYPTOPP_SHANI_AVAILABLE
+	void sha256_intel(void *input_data, uint_32t digest[8], uint_64t num_blks);
+#endif
 #endif
 
 #if CRYPTOPP_BOOL_X86 || CRYPTOPP_BOOL_X32
-	void sha256_compress_nayuki(uint_32t state[8], const uint_8t block[64]);
+	void VC_CDECL sha256_compress_nayuki(uint_32t state[8], const uint_8t block[64]);
+#endif
+
+#if CRYPTOPP_ARM_SHA2_AVAILABLE
+	void sha256_compress_digest_armv8(const void* input_data, uint_32t digest[8], uint_64t num_blks);
 #endif
 
 #if defined(__cplusplus)
@@ -318,7 +325,7 @@ extern "C"
 
 #endif
 
-CRYPTOPP_ALIGN_DATA(16) uint_32t SHA256_K[64] CRYPTOPP_SECTION_ALIGN16 = {
+CRYPTOPP_ALIGN_DATA(16) static const uint_32t SHA256_K[64] CRYPTOPP_SECTION_ALIGN16 = {
 		0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
 		0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
 		0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
@@ -447,7 +454,7 @@ static void CRYPTOPP_FASTCALL X86_SHA256_HashBlocks(uint_32t *state, const uint_
 
 #if defined(__GNUC__)
 	#if CRYPTOPP_BOOL_X64
-		CRYPTOPP_ALIGN_DATA(16) byte workspace[LOCALS_SIZE] ;
+		CRYPTOPP_ALIGN_DATA(16) uint8 workspace[LOCALS_SIZE] ;
 	#endif
 	__asm__ __volatile__
 	(
@@ -717,6 +724,13 @@ void StdSha256Transform(sha256_ctx* ctx, void* mp, uint_64t num_blks)
 #ifndef NO_OPTIMIZED_VERSIONS
 
 #if CRYPTOPP_BOOL_X64
+#if CRYPTOPP_SHANI_AVAILABLE
+void IntelSha256Transform(sha256_ctx* ctx, void* mp, uint_64t num_blks)
+{
+	sha256_intel(mp, ctx->hash, num_blks);
+}
+#endif
+
 void Avx2Sha256Transform(sha256_ctx* ctx, void* mp, uint_64t num_blks)
 {
 	if (num_blks > 1)
@@ -747,6 +761,13 @@ void SSE2Sha256Transform(sha256_ctx* ctx, void* mp, uint_64t num_blks)
 }
 #endif
 
+#if CRYPTOPP_ARM_SHA2_AVAILABLE
+void ArmSha256Transform(sha256_ctx* ctx, void* mp, uint_64t num_blks)
+{
+	sha256_compress_digest_armv8(mp, ctx->hash, num_blks);
+}
+#endif
+
 #if CRYPTOPP_BOOL_X86 || CRYPTOPP_BOOL_X32
 void Sha256AsmTransform(sha256_ctx* ctx, void* mp, uint_64t num_blks)
 {
@@ -774,7 +795,12 @@ void sha256_begin(sha256_ctx* ctx)
 	if (!sha256transfunc)
 	{
 #ifndef NO_OPTIMIZED_VERSIONS
-#ifdef _M_X64
+#if CRYPTOPP_BOOL_X64
+#if CRYPTOPP_SHANI_AVAILABLE
+		if (HasSHA256())
+			sha256transfunc = IntelSha256Transform;
+		else
+#endif
 		if (g_isIntel && HasSAVX2() && HasSBMI2())
 			sha256transfunc = Avx2Sha256Transform;
 		else if (g_isIntel && HasSAVX())
@@ -787,6 +813,12 @@ void sha256_begin(sha256_ctx* ctx)
 #if (defined(CRYPTOPP_X86_ASM_AVAILABLE) || defined(CRYPTOPP_X32_ASM_AVAILABLE))
 		if (HasSSE2 ())
 			sha256transfunc = SSE2Sha256Transform;
+		else
+#endif
+
+#if CRYPTOPP_ARM_SHA2_AVAILABLE
+		if (HasSHA256())
+			sha256transfunc = ArmSha256Transform;
 		else
 #endif
 
