@@ -1,0 +1,4 @@
+计算证书 SHA512 指纹指令
+openssl.exe x509 -in cer_path -noout -fingerprint -sha512
+
+注意证书需要是base64格式，否则会报 crypto\pem\pem_lib.c:745:Expecting: TRUSTED CERTIFICATE 错误

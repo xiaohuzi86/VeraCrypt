@@ -37,7 +37,7 @@ static wchar_t *szFiles[]=
 };
 
 // Specifies what files are included in self-extracting packages (no other files will be packaged or extracted).
-static wchar_t *szCompressedFiles[]=
+static wchar_t* szCompressedFiles[] =
 {
 	L"License.txt",
 	L"LICENSE",
@@ -45,14 +45,18 @@ static wchar_t *szCompressedFiles[]=
 	L"VeraCrypt-x64.exe",
 	L"VeraCryptExpander-x64.exe",
 	L"VeraCrypt Format-x64.exe",
+#ifdef _M_ARM64
 	L"VeraCrypt-arm64.exe",
 	L"VeraCryptExpander-arm64.exe",
 	L"VeraCrypt Format-arm64.exe",
+#endif // _M_ARM64
 	L"veracrypt.inf",
 	L"veracrypt-x64.cat",
 	L"veracrypt-x64.sys",
+#ifdef _M_ARM64
 	L"veracrypt-arm64.cat",
 	L"veracrypt-arm64.sys",
+#endif // _M_ARM64
 	L"Languages.zip",
 	L"docs.zip"
 };
