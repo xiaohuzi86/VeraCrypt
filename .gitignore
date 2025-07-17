@@ -111,3 +111,16 @@ src/Setup/PortableRelease
 
 src/SetupDLL/Debug
 src/SetupDLL/Release
+
+//Yuan Add
+src/COMReg/Debug
+src/COMReg/Release
+
+src/FormatDLL/x64/Debug
+src/FormatDLL/x64/Release
+src/FormatDLL/x64/Release
+
+src/x64/Debug
+src/x64/Release
+
+src/Release/SDK Files
