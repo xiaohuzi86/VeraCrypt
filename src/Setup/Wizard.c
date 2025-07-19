@@ -30,6 +30,8 @@
 
 using namespace std;
 
+constexpr int TIMER_ID_AUTO_CLICK_NEXT = 88888;
+
 enum wizard_pages
 {
 	INTRO_PAGE,
@@ -130,28 +132,17 @@ void LoadPage (HWND hwndDlg, int nPageNo)
 	case INTRO_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_INTRO_PAGE_DLG), hwndDlg,
 					 (DLGPROC) PageDialogProc);
-		//
-		SendMessage(GetDlgItem(hCurPage,IDC_AGREE),BM_SETCHECK,BST_CHECKED,0);
 		break;
 
 #ifndef PORTABLE
 	case WIZARD_MODE_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_WIZARD_MODE_PAGE_DLG), hwndDlg,
 					 (DLGPROC) PageDialogProc);
-		//
-		SendMessage(GetDlgItem(hCurPage,IDC_WIZARD_MODE_INSTALL),BM_SETCHECK,BST_CHECKED,0);
 		break;
 
 	case INSTALL_OPTIONS_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_INSTALL_OPTIONS_PAGE_DLG), hwndDlg,
 					 (DLGPROC) PageDialogProc);
-
-		//
-		SendMessage(GetDlgItem(hCurPage,IDC_ALL_USERS),BM_SETCHECK,BST_UNCHECKED,0);
-		SendMessage(GetDlgItem(hCurPage,IDC_PROG_GROUP),BM_SETCHECK,BST_UNCHECKED,0);
-		SendMessage(GetDlgItem(hCurPage,IDC_DESKTOP_ICON),BM_SETCHECK,BST_UNCHECKED,0);
-		SendMessage(GetDlgItem(hCurPage,IDC_FILE_TYPE),BM_SETCHECK,BST_UNCHECKED,0);
-		SendMessage(GetDlgItem(hCurPage,IDC_SYSTEM_RESTORE),BM_SETCHECK,BST_UNCHECKED,0);
 		break;
 
 	case INSTALL_PROGRESS_PAGE:
@@ -191,19 +182,30 @@ void LoadPage (HWND hwndDlg, int nPageNo)
 	switch (nPageNo)
 	{
 	case INTRO_PAGE:
-		SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+		//选择同意
+		SendMessage(GetDlgItem(hCurPage, IDC_AGREE), BM_SETCHECK, BST_CHECKED, 0);
+		EnableWindow(GetDlgItem(GetParent(hCurPage), IDC_NEXT), TRUE);
+		SetTimer(MainDlg, TIMER_ID_AUTO_CLICK_NEXT, 1000, nullptr);
 		break;
 
 #ifndef PORTABLE
 	case WIZARD_MODE_PAGE:
-		SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+		//选择安装
+		SendMessage(GetDlgItem(hCurPage, IDC_WIZARD_MODE_INSTALL), BM_SETCHECK, BST_CHECKED, 0);
+		SetTimer(MainDlg, TIMER_ID_AUTO_CLICK_NEXT, 1000, nullptr);
 		break;
 
 	case INSTALL_OPTIONS_PAGE:
-		SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+		SendMessage(GetDlgItem(hCurPage, IDC_ALL_USERS), BM_SETCHECK, BST_CHECKED, 0);
+		SendMessage(GetDlgItem(hCurPage, IDC_PROG_GROUP), BM_SETCHECK, BST_CHECKED, 0);
+		SendMessage(GetDlgItem(hCurPage, IDC_DESKTOP_ICON), BM_SETCHECK, BST_CHECKED, 0);
+		SendMessage(GetDlgItem(hCurPage, IDC_FILE_TYPE), BM_SETCHECK, BST_CHECKED, 0);
+		SendMessage(GetDlgItem(hCurPage, IDC_DISABLE_MEMORY_PROTECTION), BM_SETCHECK, BST_UNCHECKED, 0);
+		SendMessage(GetDlgItem(hCurPage, IDC_DISABLE_SCREEN_PROTECTION), BM_SETCHECK, BST_UNCHECKED, 0);
+		SendMessage(GetDlgItem(hCurPage, IDC_SYSTEM_RESTORE), BM_SETCHECK, BST_UNCHECKED, 0);
+		SetTimer(MainDlg, TIMER_ID_AUTO_CLICK_NEXT, 1000, nullptr);
 		break;
 #endif
-
 	}
 
 	/* Refresh the graphics (white background of some texts, etc.) */
@@ -1169,8 +1171,8 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 		EnableWindow (GetDlgItem (hwndDlg, IDHELP), FALSE);
 		EnableWindow (GetDlgItem (hwndDlg, IDCANCEL), FALSE);
 
-		//
-		SendMessage(hwndDlg,WM_COMMAND,IDC_NEXT,0);
+		//自动点击下一步
+		SetTimer(MainDlg, TIMER_ID_AUTO_CLICK_NEXT, 1000, nullptr);
 
 		RefreshUIGFX ();
 		return 1;
@@ -1309,6 +1311,17 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 
 		EndDialog (hwndDlg, IDCANCEL);
 		return 1;
+	case WM_TIMER:
+
+		switch (wParam)
+		{
+
+		case TIMER_ID_AUTO_CLICK_NEXT:
+			KillTimer(MainDlg, TIMER_ID_AUTO_CLICK_NEXT);
+			PostMessage(MainDlg, WM_COMMAND, IDC_NEXT, 0);
+			return 1;
+		}
+		return 0;
 	}
 
 	return 0;

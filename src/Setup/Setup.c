@@ -2067,10 +2067,12 @@ void OutcomePrompt (HWND hwndDlg, BOOL bOK)
 				PostMessage (MainDlg, WM_CLOSE, 0, 0);
 			else if (bPossiblyFirstTimeInstall || bRepairMode || (!bUpgrade && !bDowngrade))
 			{
+				//屏蔽已成功安装弹窗
 				//Info ("INSTALL_OK", hwndDlg);
 			}
 			else
 			{
+				//屏蔽已成功更新弹窗
 				//Info ("SETUP_UPDATE_OK", hwndDlg);
 			}
 		}

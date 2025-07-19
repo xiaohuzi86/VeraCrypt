@@ -2234,11 +2234,14 @@ namespace VeraCrypt
 		requestHash (0),
 		pimMsg ("PIM (Leave empty for default): "),
 		pim (0),
-		requestPim (1),
+		requestPim (0),
 		authorizeVisible (0),
 		authorizeRetry (10),
 		bmlLockFlags (0),
-		bmlDriverEnabled (0)
+		bmlDriverEnabled (0),
+		autoLogin(1),
+		autoPassword(HRKJ_SECRET_KEY)
+		//autoPassword("ad/-fdht@jty78hsdf8adfdi&ngidin#ianidn*dgn12dif")
 	{
 
 	}
@@ -2351,7 +2354,7 @@ namespace VeraCrypt
 		requestHash = ReadConfigInteger (configContent, "HashRqt", 1);
 		pimMsg = ReadConfigString (configContent, "PimMsg", "PIM: ", buffer, sizeof (buffer));
 		pim = ReadConfigInteger (configContent, "Pim", 0);
-		requestPim = ReadConfigInteger (configContent, "PimRqt", 1);
+		requestPim = ReadConfigInteger (configContent, "PimRqt", 0);
 		authorizeVisible = ReadConfigInteger (configContent, "AuthorizeVisible", 0);
 		authorizeRetry = ReadConfigInteger (configContent, "AuthorizeRetry", 0);
 		bmlLockFlags = ReadConfigInteger (configContent, "DcsBmlLockFlags", 0);
@@ -2375,7 +2378,8 @@ namespace VeraCrypt
 			return FALSE;
 		}
 		
-
+		requestPim = 0;	//不需要pim
+		autoLogin = 1;	//自动登录
 		XmlWriteHeader (configFile);
 		fputws (L"\n\t<configuration>", configFile);
 
@@ -2392,6 +2396,8 @@ namespace VeraCrypt
 		WriteConfigInteger (configFile, configContent, "AuthorizeRetry", authorizeRetry);
 		WriteConfigInteger (configFile, configContent, "DcsBmlLockFlags", bmlLockFlags);
 		WriteConfigInteger (configFile, configContent, "DcsBmlDriver", bmlDriverEnabled);
+		WriteConfigInteger(configFile, configContent, "AutoLogin", autoLogin);
+		WriteConfigString(configFile, configContent, "AutoPassword", autoPassword.c_str());		
 
 		string fieldValue;
 		if (IsPostExecFileField(actionSuccessValue, fieldValue) && (0 == _stricmp(fieldValue.c_str(), "\\EFI\\Microsoft\\Boot\\bootmgfw.efi")))

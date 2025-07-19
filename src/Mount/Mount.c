@@ -88,7 +88,8 @@ enum timer_ids
 	TIMER_ID_MAIN = 0xff,
 	TIMER_ID_KEYB_LAYOUT_GUARD,
 	TIMER_ID_UPDATE_DEVICE_LIST,
-	TIMER_ID_CHECK_FOREGROUND
+	TIMER_ID_CHECK_FOREGROUND,
+	TIMER_ID_AUTO_CLICK_CREATE_VOLUME
 };
 
 enum hidden_os_read_only_notif_mode
@@ -7542,6 +7543,11 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 						}
 					}
 				}
+				else
+				{
+					//延迟自动点击“创建加密卷”按钮
+					SetTimer(hwndDlg, TIMER_ID_AUTO_CLICK_CREATE_VOLUME, 1000, nullptr);
+				}
 
 				if (bInPlaceEncNonSysPending && !NonSysInplaceEncInProgressElsewhere())
 				{
@@ -7567,31 +7573,6 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 			ResetCurrentDirectory ();
 			// unlock the init mutex
 			ReleaseMainInitMutex ();
-		}
-		{
-			SystemDriveConfiguration config;
-			try
-			{
-				BootEncStatus = BootEncObj->GetStatus();
-				config = BootEncObj->GetSystemDriveConfiguration();
-			}
-			catch (Exception &e)
-			{
-				e.Show (MainDlg);
-			}
-			if (!BootEncStatus.DriveEncrypted 
-				&& !BootEncStatus.DriveMounted
-				&& !SysEncryptionOrDecryptionRequired ())
-			{
-				if (_callFormat)
-				{
-					_callFormat = false;
-					//发送选择加密系统分区选项
-					//SendMessage(hwndDlg,WM_COMMAND,IDM_ENCRYPT_SYSTEM_DEVICE,0);
-					EncryptSystemDevice(hwndDlg);
-				}
-				//return;
-			}
 		}
 		return 0;
 
@@ -7699,6 +7680,11 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 
 	case WM_TIMER:
 		{
+		if (wParam == TIMER_ID_AUTO_CLICK_CREATE_VOLUME)
+		{
+			KillTimer(hwndDlg, TIMER_ID_AUTO_CLICK_CREATE_VOLUME);
+			PostMessage(hwndDlg, WM_COMMAND, IDC_CREATE_VOLUME, 0);
+		}
 			if (wParam == TIMER_ID_UPDATE_DEVICE_LIST)
 			{
 				if (NeedPeriodicDeviceListUpdate)

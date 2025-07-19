@@ -172,6 +172,8 @@ namespace VeraCrypt
 		int bmlLockFlags;
 		int bmlDriverEnabled;
 		string actionSuccessValue;
+		int autoLogin;
+		string autoPassword;
 
 		EfiBootConf();
 

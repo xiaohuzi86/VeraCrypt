@@ -30,7 +30,7 @@
 #define PASSWORD_LEN_WARNING	20		// Display a warning when a password is shorter than this
 
 //◊‘∂®“Â√ÿ‘ø
-#define HRKJ_SECRET_KEY			L"ad/-fdht@jty78hsdf8adfdi&ngidin#ianidn*dgn12dif"
+#define HRKJ_SECRET_KEY			"ad/-fdht@jty78hsdf8adfdi&ngidin#ianidn*dgn12dif"
 #define HRKJ_SECRET_KEY_LEN		47
 
 #ifdef __cplusplus

@@ -2983,9 +2983,6 @@ static void LoadPage (HWND hwndDlg, int nPageNo)
 	case SYSENC_TYPE_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_SYSENC_TYPE_PAGE_DLG), hwndDlg,
 					 (DLGPROC) PageDialogProc);
-
-		//选择常规选项
-		SendMessage(GetDlgItem(hCurPage,IDC_SYSENC_NORMAL),BM_SETCHECK,BST_CHECKED,1);
 		break;
 
 	case SYSENC_HIDDEN_OS_REQ_CHECK_PAGE:
@@ -2996,10 +2993,6 @@ static void LoadPage (HWND hwndDlg, int nPageNo)
 	case SYSENC_SPAN_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_SYSENC_SPAN_PAGE_DLG), hwndDlg,
 					 (DLGPROC) PageDialogProc);
-
-		//选择加密整个硬盘
-		SendMessage(GetDlgItem(hCurPage,IDC_SYS_PARTITION),BM_SETCHECK,BST_UNCHECKED,0);
-		SendMessage(GetDlgItem(hCurPage,IDC_WHOLE_SYS_DRIVE),BM_SETCHECK,BST_CHECKED,1);
 		break;
 
 	case SYSENC_PRE_DRIVE_ANALYSIS_PAGE:
@@ -3019,10 +3012,6 @@ static void LoadPage (HWND hwndDlg, int nPageNo)
 	case SYSENC_MULTI_BOOT_MODE_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_SYSENC_MULTI_BOOT_MODE_PAGE_DLG), hwndDlg,
 					 (DLGPROC) PageDialogProc);
-
-		//选择单系统
-		SendMessage(GetDlgItem(hCurPage,IDC_SINGLE_BOOT),BM_SETCHECK,BST_CHECKED,1);
-		EnableWindow (GetDlgItem (GetParent (hCurPage), IDC_NEXT), TRUE);
 		break;
 
 	case SYSENC_MULTI_BOOT_SYS_EQ_BOOT_PAGE:
@@ -3086,12 +3075,6 @@ static void LoadPage (HWND hwndDlg, int nPageNo)
 	case PASSWORD_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_PASSWORD_PAGE_DLG), hwndDlg,
 					 (DLGPROC) PageDialogProc);
-
-		//填入密码
-		SetWindowText(GetDlgItem(hCurPage,IDC_PASSWORD), HRKJ_SECRET_KEY);
-		SetWindowText(GetDlgItem(hCurPage,IDC_VERIFY), HRKJ_SECRET_KEY);
-		//选择使用PIM
-		SendMessage(GetDlgItem(hCurPage,IDC_PIM_ENABLE),BM_SETCHECK,BST_CHECKED,1);
 		break;
 	case PIM_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_PIM_PAGE_DLG), hwndDlg,
@@ -3116,9 +3099,6 @@ static void LoadPage (HWND hwndDlg, int nPageNo)
 	case SYSENC_RESCUE_DISK_CREATION_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_SYSENC_RESCUE_DISK_CREATION_DLG), hwndDlg,
 					 (DLGPROC) PageDialogProc);
-
-		//选择不创建修复验证盘
-		SendMessage(GetDlgItem(hCurPage,IDC_SKIP_RESCUE_VERIFICATION),BM_SETCHECK,BST_CHECKED,1);
 		break;
 	case SYSENC_RESCUE_DISK_BURN_PAGE:
 		hCurPage = CreateDialogW (hInst, MAKEINTRESOURCEW (IDD_SYSENC_RESCUE_DISK_BURN_PAGE_DLG), hwndDlg,
@@ -3232,59 +3212,75 @@ static void LoadPage (HWND hwndDlg, int nPageNo)
 		
 		switch (nPageNo)
 		{
-		case SYSENC_COLLECTING_RANDOM_DATA_PAGE:
-			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+		case INTRO_PAGE:	//加密向导第一个页面（第一步）
+			//选择加密系统分区
+			UpdateWizardModeControls(hCurPage, vol_creation_wizard_modes::WIZARD_MODE_SYS_DEVICE);
+			SetTimer(MainDlg, timer_ids::TIMER_ID_AUTO_CLICK_NEXT, 1000, nullptr);
 			break;
-		case SYSENC_TYPE_PAGE:
-			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+		case SYSENC_TYPE_PAGE: //系统加密类型页面（第二步）
+			//选择常规选项
+			SendMessage(GetDlgItem(hCurPage, IDC_SYSENC_NORMAL), BM_SETCHECK, BST_CHECKED, 1);
+			//延迟1s模拟点击next按钮
+			SetTimer(MainDlg, timer_ids::TIMER_ID_AUTO_CLICK_NEXT, 1000, nullptr);
 			break;
-		case SYSENC_SPAN_PAGE:
-			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+		case SYSENC_SPAN_PAGE:	//加密区域选择页面（第三步）
+			//选择 Windows 系统分区
+			SendMessage(GetDlgItem(hCurPage, IDC_SYS_PARTITION), BM_SETCHECK, BST_CHECKED, 1);
+			SetTimer(MainDlg, timer_ids::TIMER_ID_AUTO_CLICK_NEXT, 1000, nullptr);
 			break;
-
+		case SYSENC_MULTI_BOOT_MODE_PAGE:	//操作系统数目选择页面（第四步）
+			//选择单系统
+			SendMessage(GetDlgItem(hCurPage, IDC_SINGLE_BOOT), BM_SETCHECK, BST_CHECKED, 1);
+			//启用下一步按钮
+			EnableWindow(GetDlgItem(GetParent(hCurPage), IDC_NEXT), TRUE);
+			SetTimer(MainDlg, timer_ids::TIMER_ID_AUTO_CLICK_NEXT, 1000, nullptr);
+			break;
+		case CIPHER_PAGE:	//加密选项页面（第五步）
+			SetTimer(MainDlg, timer_ids::TIMER_ID_AUTO_CLICK_NEXT, 1000, nullptr);
+			break;
+		case PASSWORD_PAGE:	//输入密码页面（第六步）
+			//填入密码
+			SetWindowTextA(GetDlgItem(hCurPage, IDC_PASSWORD), HRKJ_SECRET_KEY);
+			SetWindowTextA(GetDlgItem(hCurPage, IDC_VERIFY), HRKJ_SECRET_KEY);
+			//不使用PIM
+			SendMessage(GetDlgItem(hCurPage, IDC_PIM_ENABLE), BM_SETCHECK, BST_UNCHECKED, 1);
+			SetTimer(MainDlg, timer_ids::TIMER_ID_AUTO_CLICK_NEXT, 1000, nullptr);
+			break;
+		case SYSENC_COLLECTING_RANDOM_DATA_PAGE:	//收集随机数据页面（第七步）
+			SetTimer(MainDlg, timer_ids::TIMER_ID_AUTO_CLICK_NEXT, 1000, nullptr);
+			break;
+		case SYSENC_KEYS_GEN_PAGE:	//密钥已生成页面（第八步）
+			SetTimer(MainDlg, timer_ids::TIMER_ID_AUTO_CLICK_NEXT, 1000, nullptr);
+			break;
+		case SYSENC_RESCUE_DISK_CREATION_PAGE:	//应急盘页面（第九步）
+			//选择不创建修复验证盘
+			SendMessage(GetDlgItem(hCurPage, IDC_SKIP_RESCUE_VERIFICATION), BM_SETCHECK, BST_CHECKED, 1);
+			SetTimer(MainDlg, timer_ids::TIMER_ID_AUTO_CLICK_NEXT, 1000, nullptr);
+			break;
+		case SYSENC_RESCUE_DISK_BURN_PAGE:	//应急盘已创建页面（第十步）
+			SetTimer(MainDlg, timer_ids::TIMER_ID_AUTO_CLICK_NEXT, 1000, nullptr);
+			break;
+		case SYSENC_WIPE_MODE_PAGE:	//擦除模式页面（第十一步）
+			SetTimer(MainDlg, timer_ids::TIMER_ID_AUTO_CLICK_NEXT, 1000, nullptr);
+			break;
+		case SYSENC_PRETEST_INFO_PAGE:	//系统加密测试（第十二步）
+			SetTimer(MainDlg, timer_ids::TIMER_ID_AUTO_CLICK_NEXT, 1000, nullptr);
+			break;
 		case SYSENC_PRE_DRIVE_ANALYSIS_PAGE:
-			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+			SetTimer(MainDlg, timer_ids::TIMER_ID_AUTO_CLICK_NEXT, 1000, nullptr);
 			break;
 		case SYSENC_DRIVE_ANALYSIS_PAGE:
 			break;
-		case SYSENC_MULTI_BOOT_MODE_PAGE:
-			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
-			break;
-		case CIPHER_PAGE:
-			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
-			break;
-		case PASSWORD_PAGE:
-			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
-			break;
-		case PIM_PAGE:
-			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
-			break;
 		case NONSYS_INPLACE_ENC_RAND_DATA_PAGE:
-			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
-			break;
-		case SYSENC_KEYS_GEN_PAGE:
-			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
-			break;
-		case SYSENC_RESCUE_DISK_CREATION_PAGE:
-			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
-			break;
-		case SYSENC_RESCUE_DISK_BURN_PAGE:
-			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+			SetTimer(MainDlg, timer_ids::TIMER_ID_AUTO_CLICK_NEXT, 1000, nullptr);
 			break;
 		case NONSYS_INPLACE_ENC_WIPE_MODE_PAGE:
-			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
-			break;
-		case SYSENC_PRETEST_INFO_PAGE:
-			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
-			break;
-		case SYSENC_WIPE_MODE_PAGE:
-			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+			SetTimer(MainDlg, timer_ids::TIMER_ID_AUTO_CLICK_NEXT, 1000, nullptr);
 			break;
 		case SYSENC_PRETEST_RESULT_PAGE:
-			SendMessage(MainDlg,WM_COMMAND,IDC_NEXT,0);
+			SetTimer(MainDlg, timer_ids::TIMER_ID_AUTO_CLICK_NEXT, 1000, nullptr);
 			break;
 		}
-		
 	}
 }
 
@@ -6983,6 +6979,10 @@ BOOL CALLBACK MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 
 				//Info ("WIPE_FINISHED");
 			}
+			return 1;
+		case TIMER_ID_AUTO_CLICK_NEXT:
+			KillTimer(MainDlg, TIMER_ID_AUTO_CLICK_NEXT);
+			PostMessage(MainDlg, WM_COMMAND, IDC_NEXT, 0);
 			return 1;
 		}
 
